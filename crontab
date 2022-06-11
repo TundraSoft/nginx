@@ -1,0 +1,3 @@
+*/10 * * * * /scripts/nginx_reload.sh >> /tmp/nginx_reload.logs 2>&1
+0 0 * * * /scripts/maxmind_refresh.sh >> /tmp/maxmind_refresh.logs 2>&1
+0 0 * * * /scripts/ssl_renew.sh >> /tmp/ssl_renew.logs 2>&1

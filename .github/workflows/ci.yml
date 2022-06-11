@@ -1,0 +1,95 @@
+name: ci
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    - cron: '0 0 1 * *'
+
+env:
+  LATEST_ALPINE: 3.15.3
+  LATEST_NGINX: 1.21.6
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        alpine-version: [3.15.3, 3.14.5, 3.13.9, 3.12.11]
+        nginx-version: [1.21.6, 1.20.2, 1.18.0, 1.16.1, 1.14.2]
+
+    steps:
+      -
+        name: Checkout
+        uses: actions/checkout@v2
+      -
+        name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v3
+        with:
+          # list of Docker images to use as base name for tags
+          images: |
+            tundrasoft/nginx
+            ghcr.io/tundrasoft/nginx
+          # generate Docker tags based on the following events/attributes
+          tags: |
+            type=raw,value=latest,enable=${{ matrix.alpine-version == env.LATEST_ALPINE && matrix.nginx-version == env.LATEST_NGINX && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ matrix.nginx-version }}
+            type=semver,pattern={{version}},value=${{ matrix.nginx-version }}
+            type=raw,pattern={{version}},value=${{ matrix.nginx-version }},suffix=-alpine-${{ env.S6_VERSION }}
+            type=sha,prefix=,suffix=
+      -
+        name: Set up QEMU
+        uses: docker/setup-qemu-action@v1
+      -
+        name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v1
+      -
+        name: Login to DockerHub
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v1 
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+      -
+        name: Login to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v1
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GIT_HUB_TOKEN }}
+      -
+        name: Build and push
+        uses: docker/build-push-action@v2
+        with:
+          context: .
+          build-args: |
+            ALPINE_VERSION=${{ matrix.alpine-version }}
+            NGINX_VERSION=${{ matrix.nginx-version }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+      -
+        name: Update Docker Hub Description
+        uses: peter-evans/dockerhub-description@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PWD }}
+          repository: tundrasoft/nginx
+          #short-description: ${{ github.event.repository.description }}
+          #readme-filepath: ./path/to/README.md
+      # -
+      #   name: Push notifications to dependent repos
+      #   uses: actions/github-script@v6
+      #   with:
+      #     github-token: ${{ secrets.PAT_TOKEN }}
+      #     script: |
+      #       await github.rest.actions.createWorkflowDispatch({
+      #         owner: '',
+      #         repo: '',
+      #         workflow_id: 'ci.yml',
+      #         ref: 'master'
+      #       })
