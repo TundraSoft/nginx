@@ -1,0 +1,6 @@
+#!/command/with-contenv sh
+if [ ! -f "/etc/nginx/dhparam.pem" ]
+then
+  KEY_LENGTH=${SSL_KEY_LENGTH:-4096}
+  exec s6-setuidgid tundra openssl dhparam -dsaparam -out /etc/nginx/dhparam.pem ${KEY_LENGTH};
+fi

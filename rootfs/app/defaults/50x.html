@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>500 - Internal Server Error</title>
+    <style>
+        body {
+            font-family: 'Helvetica', 'Arial', sans-serif;
+            text-align: center;
+            margin-top: 50px;
+            background-color: #f7f7f7; /* Light theme background color */
+            color: #333; /* Light theme text color */
+        }
+
+        h1 {
+            font-size: 5rem;
+            color: #FF6347;
+            margin-bottom: 20px;
+        }
+
+        p {
+            font-size: 1.5rem;
+            color: #555;
+            margin-bottom: 20px;
+        }
+
+        body.dark-mode p {
+            color: #ddd;
+        }
+
+        img {
+            max-width: 100%;
+            height: auto;
+            margin-top: 20px;
+        }
+
+        /* Dark theme styles */
+        body.dark-mode {
+            background-color: #222; /* Dark theme background color */
+            color: #fff; /* Dark theme text color */
+        }
+    </style>
+</head>
+<body>
+    <h1>Do not panic!</h1>
+    <p>500 - Internal Server Error</p>
+    <p>Something has gone terribly wrong with the Infinite Improbability Drive.</p>
+    <p>We apologize for the inconvenience and will attempt to fix it as soon as possible.</p>
+    <script type="text/javascript">
+        // Detect system dark mode preference and apply dark mode if necessary
+        if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+            document.body.classList.add('dark-mode');
+        }
+    </script>
+</body>
+</html>

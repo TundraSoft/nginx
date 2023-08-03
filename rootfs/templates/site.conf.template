@@ -1,0 +1,96 @@
+# upstream upstream_name {
+#  server serv1:1234 fail_timeout=5s;
+#}
+server {
+  ##################################################
+  # Server Name - NOTE - if www is going to be present, it should be the second 
+  # name, example:
+  # server_name google.com www.google.com;
+  ##################################################
+  server_name $SERVERNAMES;
+  listen 80;
+  listen [::]:80;
+
+  #listen 443 ssl;
+  #listen [::]:443 ssl;
+  #ssl_certificate /etc/nginx/sites.d/$server_name/certificate.crt;
+  #ssl_certificate_key /etc/nginx/sites.d/$server_name/certificate.key;
+  #include /etc/nginx/defaults/ssl-config.conf;
+
+  include /etc/nginx/defaults/security-headers.conf;
+
+  ###################################################
+  # www -> no www redirect
+  ###################################################
+  if ($host ~ ^www\.) {
+     return 301 https://$server_name$request_uri;
+  }
+
+  ###################################################
+  # Some funky Locations
+  # These are optional and can be removed
+  ###################################################
+  # server stub status
+  location = /healthz {
+    # allow IP_ADDRESS;
+    # deny all;
+    access_log off;
+    add_header Content-Type text/plain;
+    return 200 "OK";
+  }
+
+  # Simple ping pong status
+  location = /ping {
+    access_log off;
+    add_header Content-Type text/plain;
+    return 200 "pong";
+  }
+
+  # Prevent faveicon (assuming not present)
+  location = /favicon.ico {
+    try_files $uri =404;
+    log_not_found off;
+    access_log off;
+  }
+  
+  ########################################
+  # Extras
+  ########################################
+  include /etc/nginx/defaults/accounting.conf;
+  include /etc/nginx/defaults/fancy-index-flat.conf;
+  #include /etc/nginx/defaults/maxmind-city.conf;
+  #include /etc/nginx/defaults/maxmind-country.conf;
+  #include /etc/nginx/defaults/modsecurity.conf;
+
+  ########################################
+  # Serve
+  ########################################
+  location / {
+    root /app/$server_name;
+    index index.html index.htm;
+    try_files \$uri \$uri/ =404;
+  }
+
+  ########################################
+  # Proxy
+  ########################################
+  #location / {
+  #    proxy_set_header Host $host;    
+  #    proxy_set_header Proxy "";
+  #    proxy_set_header Upgrade $http_upgrade;
+  #    proxy_set_header Connection 'upgrade';
+  #    proxy_set_header X-Real-IP $remote_addr;
+  #    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+  #    proxy_set_header X-Forwarded-Port $server_port;
+  #    proxy_set_header X-Forwarded-Proto $scheme;
+
+  #    proxy_http_version 1.1;
+  #    proxy_buffering off;
+  #    proxy_connect_timeout 60s;
+  #    proxy_read_timeout 36000s;
+  #    proxy_redirect off;
+
+  #    proxy_pass_header Authorization;
+  #    proxy_pass $upstream;
+  #}
+}

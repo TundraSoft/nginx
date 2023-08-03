@@ -1,0 +1,53 @@
+#!/bin/sh
+NGINX_CONF_PATH=${NGINX_CONF_PATH:-'/etc/nginx/sites.d'}
+NGINX_SSL_PATH=${NGINX_CERT_PATH:-'/etc/nginx/certs'}
+
+helpFunction()
+{
+   echo ""
+   echo "Usage: $0 -domain parameterA -b parameterB -c parameterC"
+   echo -e "\t-domain Description of what is parameterA"
+   echo -e "\t- Description of what is parameterB"
+   echo -e "\t-c Description of what is parameterC"
+   exit 1 # Exit script after printing help
+}
+
+generateSelfSign() {
+  local DOMAIN=$1
+  local CERT_PATH="${NGINX_SSL_PATH}/${DOMAIN}.crt"
+  local KEY_PATH="${NGINX_SSL_PATH}/${DOMAIN}.key"
+  if [ -f $CERT_PATH ]
+  then
+    mv $CERT_PATH "${CERT_PATH}.back"
+    mv $KEY_PATH "${KEY_PATH}.back"
+  fi
+  openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout KEY_PATH -out CERT_PATH -subj "/CN=$DOMAIN"
+}
+
+generateACME() {
+  local DOMAIN=$1
+  
+}
+
+newSite() {
+  local DOMAIN=$1
+  
+}
+
+
+DOMAIN=
+WWWRedirect=0
+SSL_CERT_PATH=
+SSL_KEY_PATH=
+SSL_SELF_SIGN=0
+SSL_ACME=0
+
+while getopts "help:b:c:" opt
+do
+   case "$opt" in
+      a ) parameterA="$OPTARG" ;;
+      b ) parameterB="$OPTARG" ;;
+      c ) parameterC="$OPTARG" ;;
+      ? ) helpFunction ;; # Print helpFunction in case parameter is non-existent
+   esac
+done

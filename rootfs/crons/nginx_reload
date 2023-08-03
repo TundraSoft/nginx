@@ -1,0 +1,1 @@
+$NGINX_RELOAD /scripts/nginx_reload.sh >> /var/log/nginx/nginx_reload.log 2>&1
