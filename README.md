@@ -12,13 +12,64 @@
 [![Docker image size](https://img.shields.io/docker/image-size/tundrasoft/nginx)](https://hub.docker.com/r/tundrasoft/nginx)
 [![Docker Pulls](https://img.shields.io/docker/pulls/tundrasoft/nginx.svg)](https://hub.docker.com/r/tundrasoft/nginx)
 
+Docker image for Nginx web server. It contains few custom modules pre-installed which pack a bit more of a punch to the nginx server
 
-Docker image for Nginx web server. It contains few custom modules pre-installed which pack a bit more of a punch
-to the nginx server
+## Usage
+@TODO
 
-## Installed Components
+### Using Image
+@TODO
 
-## Core Modules
+### Building image
+
+```docker
+docker build . --cpuset-cpus 0-3  --no-cache --build-arg NGINX_VERSION=1.25.1 --build-arg ALPINE_VERSION=latest --platform=linux/x86_64 -t tundrasoft/nginx
+```
+
+### Volumes
+
+Below volumes are exported by default:
+- **/app** - This is the webroot where any static content can be placed. By default 
+this will contain the below directories:
+    - defaults
+        - fancy-index - page index templates
+        - 50x.html - Default 50x error page
+        - 404.html - Default 404 error page
+        - index.htmk - Default index template
+    - ${TLD} - Any other domain's webroot
+- **/crons** - Folder where cron jobs can be added. By default 2 files are present
+    - maxmind_refresh - Refreshes maxmind database
+    - nginx_reload - cron to reload nginx if config has changed
+- **/etc/nginx** - The main nginx config path. contains all configuration options
+    - certs - All certificate files are stored here
+    - defaults - Default configuration partials are stored here
+        - modsecurity - Modsecurity configuration stored here
+    - modules - Dynamic module files are present here *NOTE* DO NOT EDIT THIS
+    - sites.d - All site configurations are present here
+        - 0-default.conf - (Generated) - Default config blocking undefined access
+    - modules.conf - List of enabled modules
+    - nginx.conf - Main config file
+- **/var/log/nginx** - All logs are stored here
+
+The folder **/etc/nginx/defaults** contains partial configuration files for different modules 
+which can be included in your site configuration to activate them. They are meant to be 
+generic and not for special use cases (basically a good starting point).
+
+## Configuration
+
+### Site Configuration
+@TODO
+
+### Creating new site
+@TODO
+
+### Generating SSL (lets encrypt etc)
+@TODO
+
+## Modules & Components
+
+### Core Modules
+
 ```bash
 --with-http_ssl_module
 --with-http_gzip_static_module
@@ -31,59 +82,72 @@ to the nginx server
 --without-http_ssi_module
 ```
 
-## Third Party
+### Third Party
 
-### Nginx upstream jDomain (dynamic)
+#### [Nginx upstream jDomain](https://github.com/nicholaschiasson/ngx_upstream_jdomain)
 
-Use domain names instead of ip address in upstream. https://github.com/nicholaschiasson/ngx_upstream_jdomain
+This module allows you to use a domain name in an upstream block and expect the domain name to be dynamically resolved so your upstream may be resilient to DNS entry updates.
 
-### Fancy Index (dynamic)
+#### [Fancy Index](https://github.com/aperezdc/ngx-fancyindex)
 
-A prettier Index page generator https://github.com/aperezdc/ngx-fancyindex
+The Fancy Index module makes possible the generation of file listings, like the built-in autoindex module does, but adding a touch of style. This is possible because the module allows a certain degree of customization of the generated content:
 
-### GeoIP2 (dynamic)
+- Custom headers, either local or stored remotely.
+- Custom footers, either local or stored remotely.
+- Add your own CSS style rules.
+- Allow choosing to sort elements by name (default), modification time, or size; both ascending (default), or descending.
 
-MaxMind GEO IP 2 database usage in nginx https://github.com/leev/ngx_http_geoip2_module
+#### [GeoIP2](https://github.com/leev/ngx_http_geoip2_module)
 
-### Traffic accounting (dynamic)
+creates variables with values from the maxmind geoip2 databases based on the client IP (default) or from a specific variable (supports both IPv4 and IPv6)
 
-Account for traffic in realtime https://github.com/Lax/traffic-accounting-nginx-module
+The module now supports nginx streams and can be used in the same way the http module can be used.
 
-### NChan (dynamic)
+#### [Traffic accounting](https://github.com/Lax/traffic-accounting-nginx-module)
 
-A pub/sub module built in nginx https://github.com/slact/nchan
-
-### ModSecurity (dynamic)
-
-A fast and reliable WAF for nginx https://github.com/spiderlabs/modsecurity/ & https://github.com/SpiderLabs/ModSecurity-nginx
-
-### Upload Progress (dynamic)
-
-Add file upload progress support in nginx https://github.com/masterzen/nginx-upload-progress-module
-
-### Nginx upstream fair TODO
-
-A more enhanced roundrobin upstream load balancer https://github.com/gnosek/nginx-upstream-fair
-
-### LDAP Authentication TODO
-
-Add LDAP authentication support in nginx https://github.com/kvspb/nginx-auth-ldap
+Account for traffic in realtime 
+A realtime traffic and status code monitor solution for NGINX, which needs less memory and cpu than other realtime log analyzing solutions. Useful for traffic accounting based on NGINX config logic (by location / server / user-defined-variables).
 
 
-## Others
+#### [NChan](https://github.com/slact/nchan)
 
-### ACME
+A pub/sub module built in nginx 
+Nchan is a scalable, flexible pub/sub server for the modern web, built as a module for the Nginx web server. It can be configured as a standalone server, or as a shim between your application and hundreds, thousands, or millions of live subscribers. It can buffer messages in memory, on-disk, or via Redis. All connections are handled asynchronously and distributed among any number of worker processes. It can also scale to many Nginx servers with Redis.
 
-Installed ACME.sh script to autogenerate SSL for using letsencrypt or equivalent. https://github.com/acmesh-official/acme.sh
+#### [ModSecurity](https://github.com/SpiderLabs/ModSecurity-nginx)
 
-### Auto Reload
+The ModSecurity-nginx connector is the connection point between nginx and libmodsecurity (ModSecurity v3). Said another way, this project provides a communication channel between nginx and libmodsecurity. This connector is required to use LibModSecurity with nginx.
+
+The ModSecurity-nginx connector takes the form of an nginx module. The module simply serves as a layer of communication between nginx and ModSecurity.
+
+#### [OWASP Core Rulesets](https://github.com/coreruleset/coreruleset)
+
+The OWASP ModSecurity Core Rule Set (CRS) is a set of generic attack detection rules for use with ModSecurity or compatible web application firewalls. The CRS aims to protect web applications from a wide range of attacks, including the OWASP Top Ten, with a minimum of false alerts.
+
+#### [Upload Progress](https://github.com/masterzen/nginx-upload-progress-module)
+
+Add file upload progress support in nginx
+
+#### [Headers More module](https://github.com/openresty/headers-more-nginx-module)
+
+Set and clear input and output headers...more than "add"!
+
+### Others
+
+#### [ACME](https://github.com/acmesh-official/acme.sh)
+
+Installed ACME.sh script to autogenerate SSL for using letsencrypt or equivalent. 
+
+#### Auto Reload
 
 Auto reloads nginx config when it detects changes in the same. It will only reload if the changes are valid. 
 
-**NOTE** Upon restart, if the config is invalid, then the service will not start!
+**NOTE** Upon container start/restart, if the config is invalid, then the service will not start!
 
 
 ## ENV Variables
+
+@TODO - To be updated.
 
 ### MAXMIND_KEY
 
@@ -142,14 +206,4 @@ The other modules are disabled/not loaded by default. To enable
 - NChan - This can be enabled on a site level. Follow sample template provided in templates folder
 - ModSecurity - This can be enabled on a site level. Follow sample template provided in templates folder
 - Upload Progress - This can be enabled on a site 
-
-## Build
-```docker
-docker build . --cpuset-cpus 0-3  --no-cache --build-arg NGINX_VERSION=1.25.1 --build-arg ALPINE_VERSION=latest --platform=linux/x86_64 -t tundrasoft/nginx
-
-docker build . --cpuset-cpus 0-3  --build-arg NGINX_VERSION=1.25.1 --build-arg ALPINE_VERSION=latest --platform=linux/x86_64 -t tundrasoft/nginx
-
-docker build . --cpuset-cpus 0-3 --no-cache --build-arg NGINX_VERSION=1.25.1 --build-arg ALPINE_VERSION=latest --platform=linux/arm/v7 -t tundrasoft/nginx
-
-```
 

@@ -249,10 +249,9 @@ COPY /rootfs/ /
 
 COPY --from=build /usr/local/modsecurity/lib/libmodsecurity.so.${MOD_SECURITY_VERSION} /usr/local/modsecurity/lib/
 COPY --from=build /modules/*.so ${NGINX_MODULES_PATH}/
-COPY --from=build /modules/*.so ${NGINX_MODULES_PATH}/
-COPY --from=build /tmp/modsecurity.conf ${NGINX_CONF_DIR}/modsecurity/
-COPY --from=build /tmp/unicode.mapping ${NGINX_CONF_DIR}/modsecurity/
-COPY --from=coreruleset /opt/owasp-crs /etc/nginx/modsecurity/owasp
+COPY --from=build /tmp/modsecurity.conf ${NGINX_CONF_DIR}/defaults/modsecurity/
+COPY --from=build /tmp/unicode.mapping ${NGINX_CONF_DIR}/defaults/modsecurity/
+COPY --from=coreruleset /opt/owasp-crs /etc/nginx/defaults/modsecurity/owasp
 
 RUN ln -s /usr/local/modsecurity/lib/libmodsecurity.so.${MOD_SECURITY_VERSION} /usr/local/modsecurity/lib/libmodsecurity.so.3.0; \
     ln -s /usr/local/modsecurity/lib/libmodsecurity.so.${MOD_SECURITY_VERSION} /usr/local/modsecurity/lib/libmodsecurity.so.3; \
