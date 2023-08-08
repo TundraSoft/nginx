@@ -4,7 +4,7 @@ ARG ALPINE_VERSION \
     NGINX_VERSION
 
 # we use latest only as this is for build
-FROM --platform=$BUILDPLATFORM tundrasoft/alpine:latest as build
+FROM --platform=$TARGETPLATFORM tundrasoft/alpine:latest as build
 
 ARG ALPINE_VERSION \
     CRS_VERSION \
@@ -93,7 +93,7 @@ RUN set -eux; \
     cd /modules;
 
 # Core Rule set
-FROM --platform=$BUILDPLATFORM tundrasoft/alpine:latest as coreruleset
+FROM --platform=$TARGETPLATFORM tundrasoft/alpine:latest as coreruleset
 
 ARG CRS_VERSION
 
