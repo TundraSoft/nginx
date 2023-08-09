@@ -4,7 +4,7 @@ ARG ALPINE_VERSION \
     NGINX_VERSION
 
 # we use latest only as this is for build
-FROM --platform=$TARGETPLATFORM tundrasoft/alpine:latest as build
+FROM tundrasoft/alpine:latest as build
 
 ARG ALPINE_VERSION \
     CRS_VERSION \
@@ -93,7 +93,7 @@ RUN set -eux; \
     cd /modules;
 
 # Core Rule set
-FROM --platform=$TARGETPLATFORM tundrasoft/alpine:latest as coreruleset
+FROM tundrasoft/alpine:latest as coreruleset
 
 ARG CRS_VERSION
 
@@ -255,9 +255,7 @@ COPY --from=coreruleset /opt/owasp-crs /etc/nginx/defaults/modsecurity/owasp
 
 RUN ln -s /usr/local/modsecurity/lib/libmodsecurity.so.${MOD_SECURITY_VERSION} /usr/local/modsecurity/lib/libmodsecurity.so.3.0; \
     ln -s /usr/local/modsecurity/lib/libmodsecurity.so.${MOD_SECURITY_VERSION} /usr/local/modsecurity/lib/libmodsecurity.so.3; \
-    ln -s /usr/local/modsecurity/lib/libmodsecurity.so.${MOD_SECURITY_VERSION} /usr/local/modsecurity/lib/libmodsecurity.so; \
-    ln -s /usr/local/lib/libyajl.so.${YAJL_VERSION} /usr/local/lib/libyajl.so; \
-    ln -s /usr/local/lib/libyajl.so.${YAJL_VERSION} /usr/local/lib/libyajl.so.2;
+    ln -s /usr/local/modsecurity/lib/libmodsecurity.so.${MOD_SECURITY_VERSION} /usr/local/modsecurity/lib/libmodsecurity.so;
 
 # /etc/nginx is Config /app is the webroot /var/log/nginx is the log path
 VOLUME [ "/etc/nginx", "/app", "/var/log/nginx" ]
