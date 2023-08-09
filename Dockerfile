@@ -155,16 +155,13 @@ COPY /rootfs/ /
 
 COPY --from=modsecurity /usr/local/modsecurity/lib/libmodsecurity.so.${MOD_SECURITY_VERSION} /usr/local/modsecurity/lib/
 COPY --from=modsecurity /modules/*.so ${NGINX_MODULES_PATH}/
-COPY --from=modsecurity /modules/*.so ${NGINX_MODULES_PATH}/
 COPY --from=modsecurity /tmp/modsecurity.conf ${NGINX_CONF_DIR}/modsecurity/
 COPY --from=modsecurity /tmp/unicode.mapping ${NGINX_CONF_DIR}/modsecurity/
 COPY --from=coreruleset /opt/owasp-crs /etc/nginx/modsecurity/owasp
 
 RUN ln -s /usr/local/modsecurity/lib/libmodsecurity.so.${MOD_SECURITY_VERSION} /usr/local/modsecurity/lib/libmodsecurity.so.3.0; \
     ln -s /usr/local/modsecurity/lib/libmodsecurity.so.${MOD_SECURITY_VERSION} /usr/local/modsecurity/lib/libmodsecurity.so.3; \
-    ln -s /usr/local/modsecurity/lib/libmodsecurity.so.${MOD_SECURITY_VERSION} /usr/local/modsecurity/lib/libmodsecurity.so; \
-    ln -s /usr/local/lib/libyajl.so.${YAJL_VERSION} /usr/local/lib/libyajl.so; \
-    ln -s /usr/local/lib/libyajl.so.${YAJL_VERSION} /usr/local/lib/libyajl.so.2;
+    ln -s /usr/local/modsecurity/lib/libmodsecurity.so.${MOD_SECURITY_VERSION} /usr/local/modsecurity/lib/libmodsecurity.so;
 
 # /etc/nginx is Config /app is the webroot /var/log/nginx is the log path
 VOLUME [ "/etc/nginx", "/app", "/var/log/nginx" ]

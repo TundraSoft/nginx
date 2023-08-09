@@ -50,7 +50,7 @@ jobs:
   
   compile-modsecurity:
     needs: [get-versions]
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     strategy:
       fail-fast: true
       matrix: 
@@ -97,7 +97,7 @@ jobs:
   
   build-nginx:
     needs: [get-versions, compile-modsecurity]
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     strategy:
       # max-parallel: 2
       fail-fast: false
