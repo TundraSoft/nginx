@@ -82,6 +82,10 @@ jobs:
           file: ./Dockerfile.modsecurity
           tags: modsecurity
           platforms: ${{ matrix.platform }}
+          build-args: |
+            NGINX_VERSION=${{ matrix.nginx-version }}
+            MOD_SECURITY_VERSION=${{ needs.get-versions.outputs.modsecurity-version }}
+            CRS_VERSION=${{ needs.get-versions.outputs.crs-version }}
           outputs: type=docker,dest=/tmp/modsecurity-${{ matrix.nginx-version }}-${{ steps.image-name.outputs.ImageName }}.tar
       -
         name: Upload artifact
