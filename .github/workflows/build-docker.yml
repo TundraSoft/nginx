@@ -67,7 +67,7 @@ jobs:
         name: Handle Image Name
         id: image-name
         run: |
-          echo "ImageName=${matrix.platform/\//-}" >> $GITHUB_OUTPUT
+          echo "ImageName=${matrix.platform//\//-}" >> $GITHUB_OUTPUT
       -
         name: Build and export
         uses: docker/build-push-action@v4
@@ -126,7 +126,7 @@ jobs:
         name: Handle Image Name
         id: image-name
         run: |
-          echo "ImageName=${matrix.platform/\//-}" >> $GITHUB_OUTPUT
+          echo "ImageName=${matrix.platform//\//-}" >> $GITHUB_OUTPUT
       -
         name: Download artifact
         uses: actions/download-artifact@v3
