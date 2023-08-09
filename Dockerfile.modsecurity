@@ -1,0 +1,96 @@
+ARG ALPINE_VERSION \
+    CRS_VERSION=3.3.5 \
+    MOD_SECURITY_VERSION=3.0.9 \
+    NGINX_VERSION
+
+# we use latest only as this is for build
+FROM tundrasoft/alpine:latest as build
+
+ARG ALPINE_VERSION \
+    CRS_VERSION \
+    MOD_SECURITY_VERSION \
+    NGINX_VERSION\
+    TARGETPLATFORM \
+    TARGETARCH \
+    TARGETVARIANT
+
+RUN set -eux; \
+    apk add --no-cache \
+      autoconf \
+      automake \
+      build-base \
+      cmake \
+      curl-dev \
+      gcc \
+      geoip-dev \
+      git \
+      libc-dev \
+      libfuzzy2-dev \
+      libmaxminddb-dev \
+      libtool \
+      libxslt-dev \
+      lmdb-dev \
+      linux-headers \
+      make \
+      openssl \
+      openssl-dev \
+      pcre-dev \
+      pcre2-dev \
+      ruby \
+      ruby-dev \
+      ruby-rake \
+      wget \
+      yajl \
+      yajl-dev \
+      zlib-dev;
+
+WORKDIR /tmp
+
+RUN set -eux; \
+    git clone https://github.com/SpiderLabs/ModSecurity --branch v${MOD_SECURITY_VERSION} --depth 1; \
+    cd ModSecurity; \
+    ./build.sh; \
+    git submodule init; \
+    git submodule update; \
+    ./configure --with-yajl --with-ssdeep --with-lmdb --with-geoip --with-pcre2 --enable-silent-rules; \
+    make -j$(nproc) install; \
+    strip /usr/local/modsecurity/lib/lib*.so*; \
+    wget --quiet https://raw.githubusercontent.com/SpiderLabs/ModSecurity/v3/master/modsecurity.conf-recommended \
+        -O /tmp/modsecurity.conf; \
+    wget --quiet https://raw.githubusercontent.com/SpiderLabs/ModSecurity/v3/master/unicode.mapping \
+        -O /tmp/unicode.mapping;
+
+# ADD https://raw.githubusercontent.com/SpiderLabs/ModSecurity/v3/master/modsecurity.conf-recommended /tmp/modsecurity.conf
+# ADD https://raw.githubusercontent.com/SpiderLabs/ModSecurity/v3/master/unicode.mapping /tmp/unicode.mapping
+
+RUN set -eux; \
+    mkdir /modules; \
+    git clone -b master --depth 1 https://github.com/slact/nchan.git; \
+    git clone -b master --depth 1 https://github.com/Lax/traffic-accounting-nginx-module.git; \
+    git clone -b master --depth 1 https://github.com/leev/ngx_http_geoip2_module.git; \
+    git clone -b master --depth 1 https://github.com/SpiderLabs/ModSecurity-nginx.git; \
+    git clone -b master --depth 1 https://github.com/nicholaschiasson/ngx_upstream_jdomain.git; \
+    git clone -b master --depth 1 https://github.com/openresty/headers-more-nginx-module.git; \
+    git clone -b master --depth 1 https://github.com/masterzen/nginx-upload-progress-module.git; \
+    git clone -b master --depth 1 https://github.com/aperezdc/ngx-fancyindex.git; \
+    wget https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz -O nginx-${NGINX_VERSION}.tar.gz; \
+    tar -xzf nginx-${NGINX_VERSION}.tar.gz; \
+    cd ./nginx-${NGINX_VERSION}; \
+    ./configure --with-compat \
+      --with-stream \
+      --add-dynamic-module=../nchan \
+      --add-dynamic-module=../ngx_http_geoip2_module \
+      --add-dynamic-module=../ModSecurity-nginx \
+      --add-dynamic-module=../ngx_upstream_jdomain \
+      --add-dynamic-module=../headers-more-nginx-module \
+      --add-dynamic-module=../ngx-fancyindex; \
+    make -j$(nproc) modules; \
+    strip objs/*.so; \
+    cp objs/*.so /modules/; \
+    rm -rf objs/*; \
+    ./configure --with-compat \
+      --add-dynamic-module=../traffic-accounting-nginx-module; \
+    make -j$(nproc) modules; \
+    strip objs/*.so; \
+    cp objs/*.so /modules/; \
+    cd /modules;

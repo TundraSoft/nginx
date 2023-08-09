@@ -48,8 +48,38 @@ jobs:
           crs_version=$(curl -s https://api.github.com/repos/coreruleset/coreruleset/releases/latest | jq -r .tag_name | sed -e 's/^v//')
           echo "crs-version=${crs_version}" >> "$GITHUB_OUTPUT"
   
-  build-image:
+  compile-modsecurity:
     needs: [get-versions]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix: 
+        nginx-version: ${{ fromJson(needs.get-versions.outputs.nginx-versions) }}
+        platform: [linux/amd64,linux/arm64/v8]
+    steps:
+      -
+        name: Checkout
+        uses: actions/checkout@v2
+      -
+        name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+      -
+        name: Build and export
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          tags: modsecurity
+          outputs: type=docker,dest=/tmp/modsecurity-${{ matrix.nginx-version }}-${{ matrix.platform }}.tar
+      -
+        name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: modsecurity
+          path: /tmp/modsecurity-${{ matrix.nginx-version }}-${{ matrix.platform }}.tar
+          retention-days: 1
+  
+  build-nginx:
+    needs: [get-versions, compile-modsecurity]
     runs-on: ubuntu-latest
     strategy:
       # max-parallel: 2
@@ -57,6 +87,7 @@ jobs:
       matrix:
         nginx-version: ${{ fromJson(needs.get-versions.outputs.nginx-versions) }}
         alpine-version: ${{ fromJson(needs.get-versions.outputs.alpine-versions) }}
+        platform: [linux/amd64,linux/arm64/v8]
     steps:
       -
         name: Checkout
@@ -84,6 +115,17 @@ jobs:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GIT_HUB_TOKEN }}
+      -
+        name: Download artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: modsecurity
+          path: /tmp
+      -
+        name: Load image
+        run: |
+          docker load --input /tmp/modsecurity-${{ matrix.nginx-version }}-${{ matrix.platform }}.tar
+          docker image ls -a
       -
         name: Docker meta
         id: meta
