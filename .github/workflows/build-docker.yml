@@ -67,7 +67,7 @@ jobs:
         name: Handle Image Name
         id: image-name
         run: |
-          echo "ImageName=${matrix.platform//\//-}" >> $GITHUB_OUTPUT
+          echo "ImageName=${matrix.platform////-}" >> $GITHUB_OUTPUT
       -
         name: Build and export
         uses: docker/build-push-action@v4
@@ -126,7 +126,7 @@ jobs:
         name: Handle Image Name
         id: image-name
         run: |
-          echo "ImageName=${matrix.platform//\//-}" >> $GITHUB_OUTPUT
+          echo "ImageName=${matrix.platform////-}" >> $GITHUB_OUTPUT
       -
         name: Download artifact
         uses: actions/download-artifact@v3
@@ -156,7 +156,7 @@ jobs:
         with:
           context: .
           # platforms: linux/amd64,linux/arm/v7,linux/arm64,linux/arm/v8
-          platforms: linux/amd64,linux/arm64/v8
+          # platforms: linux/amd64,linux/arm64/v8
           provenance: false
           build-args: |
             ALPINE_VERSION=${{ matrix.alpine-version }}
