@@ -68,6 +68,7 @@ jobs:
         uses: docker/build-push-action@v4
         with:
           context: .
+          file: ./Dockerfile.modsecurity
           tags: modsecurity
           outputs: type=docker,dest=/tmp/modsecurity-${{ matrix.nginx-version }}-${{ matrix.platform }}.tar
       -
