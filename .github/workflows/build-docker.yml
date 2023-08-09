@@ -60,6 +60,13 @@ jobs:
       -
         name: Checkout
         uses: actions/checkout@v2
+      - 
+        name: Handle Image Name
+        id: image-name
+        run: |
+          brew install docker
+          img=${{ matrix.platform }}
+          echo "ImageName=${img////-}" >> $GITHUB_OUTPUT
       -
         # Add support for more platforms with QEMU (optional)
         # https://github.com/docker/setup-qemu-action
@@ -68,12 +75,6 @@ jobs:
       -
         name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
-      - 
-        name: Handle Image Name
-        id: image-name
-        run: |
-          img=${{ matrix.platform }}
-          echo "ImageName=${img////-}" >> $GITHUB_OUTPUT
       -
         name: Build and export
         uses: docker/build-push-action@v4
@@ -97,7 +98,7 @@ jobs:
   
   build-nginx:
     needs: [get-versions, compile-modsecurity]
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     strategy:
       # max-parallel: 2
       fail-fast: false
@@ -109,6 +110,13 @@ jobs:
       -
         name: Checkout
         uses: actions/checkout@v3
+      - 
+        name: Handle Image Name
+        id: image-name
+        run: |
+          brew install docker
+          img=${{ matrix.platform }}
+          echo "ImageName=${img////-}" >> $GITHUB_OUTPUT
       -
         # Add support for more platforms with QEMU (optional)
         # https://github.com/docker/setup-qemu-action
@@ -132,12 +140,6 @@ jobs:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GIT_HUB_TOKEN }}
-      - 
-        name: Handle Image Name
-        id: image-name
-        run: |
-          img=${{ matrix.platform }}
-          echo "ImageName=${img////-}" >> $GITHUB_OUTPUT
       -
         name: Download artifact
         uses: actions/download-artifact@v3
