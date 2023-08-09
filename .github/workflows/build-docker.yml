@@ -63,6 +63,11 @@ jobs:
       -
         name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
+      - 
+        name: Handle Image Name
+        id: image-name
+        run: |
+          echo "ImageName=${matrix.platform/\//-}" >> $GITHUB_OUTPUT
       -
         name: Build and export
         uses: docker/build-push-action@v4
@@ -70,7 +75,8 @@ jobs:
           context: .
           file: ./Dockerfile.modsecurity
           tags: modsecurity
-          outputs: type=docker,dest=/tmp/modsecurity-${{ matrix.nginx-version }}-${{ matrix.platform }}.tar
+          platforms: ${{ matrix.platform }}
+          outputs: type=docker,dest=/tmp/modsecurity-${{ matrix.nginx-version }}-${{ steps.image-name.outputs.ImageName }}.tar
       -
         name: Upload artifact
         uses: actions/upload-artifact@v3
@@ -116,6 +122,11 @@ jobs:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GIT_HUB_TOKEN }}
+      - 
+        name: Handle Image Name
+        id: image-name
+        run: |
+          echo "ImageName=${matrix.platform/\//-}" >> $GITHUB_OUTPUT
       -
         name: Download artifact
         uses: actions/download-artifact@v3
@@ -125,7 +136,7 @@ jobs:
       -
         name: Load image
         run: |
-          docker load --input /tmp/modsecurity-${{ matrix.nginx-version }}-${{ matrix.platform }}.tar
+          docker load --input /tmp/modsecurity-${{ matrix.nginx-version }}-${{ steps.image-name.outputs.ImageName }}.tar
           docker image ls -a
       -
         name: Docker meta
