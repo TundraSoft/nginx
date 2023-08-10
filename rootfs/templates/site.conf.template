@@ -11,10 +11,6 @@ server {
   listen 80;
   listen [::]:80;
 
-  #listen 443 ssl;
-  #listen [::]:443 ssl;
-  #ssl_certificate /etc/nginx/sites.d/$server_name/certificate.crt;
-  #ssl_certificate_key /etc/nginx/sites.d/$server_name/certificate.key;
   #include /etc/nginx/defaults/ssl-config.conf;
 
   include /etc/nginx/defaults/security-headers.conf;

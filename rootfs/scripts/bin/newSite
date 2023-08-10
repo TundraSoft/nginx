@@ -1,53 +1,138 @@
 #!/bin/sh
-NGINX_CONF_PATH=${NGINX_CONF_PATH:-'/etc/nginx/sites.d'}
-NGINX_SSL_PATH=${NGINX_CERT_PATH:-'/etc/nginx/certs'}
+NGINX_CONF_PATH=${NGINX_CONF_PATH:-'/etc/nginx/sites.d/'}
+NGINX_CERT_PATH=${NGINX_CERT_PATH:-'/etc/nginx/certs/'}
+NGINX_WEBROOT=${NGINX_WEBROOT:-'/app'}
+SITE_TEMPLATE="/templates/site.conf.template"
 
-helpFunction()
-{
-   echo ""
-   echo "Usage: $0 -domain parameterA -b parameterB -c parameterC"
-   echo -e "\t-domain Description of what is parameterA"
-   echo -e "\t- Description of what is parameterB"
-   echo -e "\t-c Description of what is parameterC"
-   exit 1 # Exit script after printing help
+# Function to display help message
+display_help() {
+  echo "Usage: $0 --domain=<domain> --sslmode=<mode> [--dryrun]"
+  echo
+  echo "  --domain    : Top Level Domain, e.g. abc.com"
+  echo "  --sslmode   : SSL Mode, must be one of 'ACME', 'SELF', 'MANUAL'"
+  echo "  --dryrun    : Optional flag, if passed then set to true else false"
+  exit 1
 }
 
-generateSelfSign() {
-  local DOMAIN=$1
-  local CERT_PATH="${NGINX_SSL_PATH}/${DOMAIN}.crt"
-  local KEY_PATH="${NGINX_SSL_PATH}/${DOMAIN}.key"
-  if [ -f $CERT_PATH ]
-  then
-    mv $CERT_PATH "${CERT_PATH}.back"
-    mv $KEY_PATH "${KEY_PATH}.back"
-  fi
-  openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout KEY_PATH -out CERT_PATH -subj "/CN=$DOMAIN"
-}
+# If no arguments are provided, display help
+if [ $# -eq 0 ]; then
+  display_help
+fi
 
-generateACME() {
-  local DOMAIN=$1
-  
-}
+# Initialize variables
+domain=""
+sslmode=""
+dryrun="false"
+alt_domains=""
 
-newSite() {
-  local DOMAIN=$1
-  
-}
-
-
-DOMAIN=
-WWWRedirect=0
-SSL_CERT_PATH=
-SSL_KEY_PATH=
-SSL_SELF_SIGN=0
-SSL_ACME=0
-
-while getopts "help:b:c:" opt
+# Parse command-line arguments
+for arg in "$@"
 do
-   case "$opt" in
-      a ) parameterA="$OPTARG" ;;
-      b ) parameterB="$OPTARG" ;;
-      c ) parameterC="$OPTARG" ;;
-      ? ) helpFunction ;; # Print helpFunction in case parameter is non-existent
-   esac
+  case $arg in
+    --domain=*)
+    domain="${arg#*=}"
+    ;;
+    --sslmode=*)
+    sslmode="${arg#*=}"
+    ;;
+    --alt-domains=*)
+    alt_domains="${arg#*=}"
+    shift
+    ;;
+    --dryrun)
+    dryrun="true"
+    ;;
+    *)
+    echo "Unknown argument: $arg"
+    display_help
+    ;;
+  esac
 done
+
+# Check if mandatory arguments were provided
+if [ -z "$domain" ] || [ -z "$sslmode" ]; then
+  echo "Both --domain and --sslmode arguments are mandatory."
+  display_help
+fi
+
+# Validate sslmode
+if [ "$sslmode" != "ACME" ] && [ "$sslmode" != "SELF" ] && [ "$sslmode" != "MANUAL" ]; then
+  echo "sslmode must be one of 'ACME', 'SELF', or 'MANUAL'."
+  display_help
+fi
+
+# Print the values
+echo "Domain: $domain"
+echo "SSL Mode: $sslmode"
+echo "Dry Run: $dryrun"
+
+directory_present=false
+config_present=false
+if [ -d "$NGINX_WEBROOT/$domain" ]; then
+  directory_present=true
+fi
+if [ -f "$NGINX_CONF_PATH/$domain.conf" ]; then
+  config_present=true
+fi
+
+# Create a directory in NGINX_WEBROOT with the domain name
+domain_path="$NGINX_WEBROOT/$domain"
+if [ ! -d "$domain_path" ]; then
+  mkdir -p "$domain_path"
+else
+  if [ "$dryrun" = "true" ] && [ "$directory_present" = "true" ] && [ "$config_present" = "true" ]; then
+    echo "Config already present for domain: $domain. Exiting."
+    exit 0
+  fi
+fi
+
+
+# If sslmode is SELF, generate a self-signed certificate
+if [ "$sslmode" = "SELF" ]; then
+  openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+          -keyout "$NGINX_CERT_PATH/$domain.key" \
+          -out "$NGINX_CERT_PATH/$domain.crt" \
+          -subj "/C=US/ST=State/L=City/O=Organization/OU=Unit/CN=$domain"
+elif [ "$sslmode" = "ACME" ]; then
+  # Call the acme script
+  ./acme
+fi
+
+
+SERVERNAMES="$domain"
+if [ ! -z "$alt_domains" ]; then
+  # Replace commas with spaces
+  alt_domains=$(echo "$alt_domains" | tr ',' ' ')
+  SERVERNAMES="$SERVERNAMES $alt_domains"
+fi
+
+
+# Use envsubst on SITE_TEMPLATE and set output to NGINX_CONF_PATH
+envsubst '$SERVERNAMES' < "$SITE_TEMPLATE" > "$NGINX_CONF_PATH/$domain.conf"
+
+# Test the NGINX configuration
+nginx -t
+
+if [ $? -eq 0 ]; then
+  echo "NGINX configuration test is successful."
+else
+  echo "Error in NGINX configuration. Disabling the site configuration."
+  if [ "$dryrun" = "false" ]
+  then
+    mv "$config_file_path" "$NGINX_CONF_PATH/$domain.conf.disabled"
+  fi
+fi
+
+# If dryrun is true, revert changes unless config was already present
+if [ "$dryrun" = "true" ] && [ "$config_present" = "false" ]; then
+  echo "Dry run mode: Reverting changes."
+  rm -f "$config_file_path" "$NGINX_CONF_PATH/$domain.conf"
+  if [ "$sslmode" = "SELF" ]; then
+    rm -f "$NGINX_CERT_PATH/$domain.key" "$NGINX_CERT_PATH/$domain.crt"
+  fi
+fi
+
+# Remove the directory if it was not present before and dryrun is true
+if [ "$dryrun" = "true" ] && [ "$directory_present" = "false" ]; then
+  rm -rf "$domain_path"
+fi
