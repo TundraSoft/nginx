@@ -68,8 +68,13 @@ RUN set -eux; \
     git clone -b master --depth 1 https://github.com/SpiderLabs/ModSecurity-nginx.git; \
     git clone -b master --depth 1 https://github.com/nicholaschiasson/ngx_upstream_jdomain.git; \
     git clone -b master --depth 1 https://github.com/openresty/headers-more-nginx-module.git; \
-    git clone -b master --depth 1 https://github.com/masterzen/nginx-upload-progress-module.git; \
+    git clone -b master --depth 1 https://github.com/dstroma/nginx-upload-progress-module.git; \
     git clone -b master --depth 1 https://github.com/aperezdc/ngx-fancyindex.git; \
+    git clone -b master --depth 1 https://github.com/cinquemb/nginx-upstream-serverlist.git; \
+    git clone -b master --depth 1 https://github.com/hnlq715/status-nginx-module.git; \
+    # Below 2 are under test\
+    git clone --depth 1 https://github.com/vozlt/nginx-module-vts.git; \
+    git clone --depth 1 https://github.com/cubicdaiya/ngx_dynamic_upstream.git;\
     wget https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz -O nginx-${NGINX_VERSION}.tar.gz; \
     tar -xzf nginx-${NGINX_VERSION}.tar.gz; \
     cd ./nginx-${NGINX_VERSION}; \
@@ -80,7 +85,12 @@ RUN set -eux; \
       --add-dynamic-module=../ModSecurity-nginx \
       --add-dynamic-module=../ngx_upstream_jdomain \
       --add-dynamic-module=../headers-more-nginx-module \
-      --add-dynamic-module=../ngx-fancyindex; \
+      --add-dynamic-module=../nginx-upload-progress-module \
+      --add-dynamic-module=../ngx-fancyindex \
+      --add-dynamic-module=../nginx-upstream-serverlist \
+      --add-dynamic-module=../status-nginx-module \
+      --add-dynamic-module=../nginx-module-vts \
+      --add-dynamic-module=../ngx_dynamic_upstream; \
     make -j$(nproc) modules; \
     strip objs/*.so; \
     cp objs/*.so /modules/; \
@@ -121,7 +131,7 @@ LABEL maintainer="Abhinav A V <abhai2k@gmail.com>"
 ARG ALPINE_VERSION \
     CRS_VERSION \
     MOD_SECURITY_VERSION \
-    NGINX_CONF_DIR=/etc/nginx/ \
+    NGINX_CONF_DIR=/etc/nginx \
     NGINX_MODULES_PATH=/etc/nginx/modules \
     NGINX_PREFIX=/usr/local/nginx \
     NGINX_VERSION
@@ -184,8 +194,10 @@ ENV ACME_SERVER='letsencrypt' \
     MODSEC_TMP_DIR=/tmp/modsecurity/tmp \
     MODSEC_TMP_SAVE_UPLOADED_FILES="on" \
     MODSEC_UPLOAD_DIR=/tmp/modsecurity/upload \
+    NGINX_ALLOWED_SAFE_IP=\
+    NGINX_CACHE_DIR=/var/cache/nginx \
     NGINX_RELOAD='*/10 * * * *' \
-    NGINX_CERT_PATH=${NGINX_CONF_DIR}/certs/ \
+    NGINX_CERT_PATH=${NGINX_CONF_DIR}/certs \
     NGINX_WEBROOT=/app \
     SSL_KEY_LENGTH=4096
 
@@ -248,7 +260,7 @@ RUN set -eux; \
 COPY /rootfs/ /
 
 COPY --from=build /usr/local/modsecurity/lib/libmodsecurity.so.${MOD_SECURITY_VERSION} /usr/local/modsecurity/lib/
-COPY --from=build /modules/*.so ${NGINX_MODULES_PATH}/
+COPY --from=build /modules/*.so /modules/
 COPY --from=build /tmp/modsecurity.conf ${NGINX_CONF_DIR}/defaults/modsecurity/
 COPY --from=build /tmp/unicode.mapping ${NGINX_CONF_DIR}/defaults/modsecurity/
 COPY --from=coreruleset /opt/owasp-crs /etc/nginx/defaults/modsecurity/owasp

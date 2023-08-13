@@ -44,7 +44,7 @@ this will contain the below directories:
     - certs - All certificate files are stored here
     - defaults - Default configuration partials are stored here
         - modsecurity - Modsecurity configuration stored here
-    - modules - Dynamic module files are present here *NOTE* DO NOT EDIT THIS
+    - modules - Dynamic module files are present here *NOTE* Modules will be copied dynamically on boot
     - sites.d - All site configurations are present here
         - 0-default.conf - (Generated) - Default config blocking undefined access
     - modules.conf - List of enabled modules
@@ -126,11 +126,23 @@ The OWASP ModSecurity Core Rule Set (CRS) is a set of generic attack detection r
 
 #### [Upload Progress](https://github.com/masterzen/nginx-upload-progress-module)
 
-Add file upload progress support in nginx
+Add file upload progress support in nginx. 
+Using https://github.com/dstroma/nginx-upload-progress-module as https://github.com/masterzen/nginx-upload-progress-module is not patched
 
 #### [Headers More module](https://github.com/openresty/headers-more-nginx-module)
 
 Set and clear input and output headers...more than "add"!
+
+### [Dynamic Upstream](https://github.com/cubicdaiya/ngx_dynamic_upstream)
+ngx_dynamic_upstream is the module for operating upstreams dynamically with HTTP APIs such as ngx_http_upstream_conf.
+
+### [Status Module](https://github.com/hnlq715/status-nginx-module)
+This module will help monitor running status of Nginx.
+
+It can provide running status information of Nginx.
+The information is divided into different zones, and each zone is independent.
+The status information is about connections, requests, response status codes, input and output flows, rt, and upstreams.
+It shows all the results by default, and can be set to show part of them by specifying zones.
 
 ### Others
 
