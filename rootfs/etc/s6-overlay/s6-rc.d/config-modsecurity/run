@@ -21,10 +21,10 @@ fi
 for suffix in "config" "before" "after"; do
     if [ -n "$(find /etc/nginx/defaults/modsecurity/owasp -path "/etc/nginx/defaults/modsecurity/owasp/plugins/*-${suffix}.conf")" ]; then
         # enable if there are config files
-        sed -i -E "s/^#\s*(.+-${suffix}\.conf)/\1/" /etc/nginx/defaults/modsecurity.conf
+        sed -i -E "s/^#\s*(.+-${suffix}\.conf)/\1/" /etc/nginx/defaults/modsecurity/modsecurity.conf
     else
         # disable if there are no config files
-        sed -i -E "s/^([^#]+-${suffix}\.conf)/# \1/" /etc/nginx/defaults/modsecurity.conf
+        sed -i -E "s/^([^#]+-${suffix}\.conf)/# \1/" /etc/nginx/defaults/modsecurity/modsecurity.conf
     fi
 done
 
