@@ -163,8 +163,9 @@ generate_ssl() {
   case $MODE in
     "acme")
       debug "Generating SSL certificate using ACME for ${DOMAIN}"
-      debug "command: --issue --stateless -d ${ALL_DOMAINS// /-d }"
-      /bin/acme --issue --stateless -d ${ALL_DOMAINS// /-d }
+      # local COMMAND="--issue --stateless -d ${ALL_DOMAINS// /-d }"
+      # debug "command: ${COMMAND}"
+      acme --issue --stateless -d ${DOMAIN}
       ;;
     "self")
       debug "Generating self signed certificate from ${DOMAIN}"
@@ -183,7 +184,7 @@ generate_ssl() {
       fi
       ;;
     *)
-      echo "Invalid SSL mode: $sslmode"
+      echo "Invalid SSL mode: $MODE"
       exit 1
       ;;
   esac
@@ -283,25 +284,29 @@ for arg in "$@"
 do
   case $arg in
     --domain=*)
-    DOMAIN=$(echo "${arg#*=}" | tr '[:lower:]')
+    DOMAIN=$(echo "${arg#*=}" | tr '[:upper:]' '[:lower:]')
     ;;
     --alt-domains=*)
-    ALT_DOMAINS=$(echo "${arg#*=}" | tr '[:lower:]')
-    shift
+    ALT_DOMAINS=$(echo "${arg#*=}" | tr '[:upper:]' '[:lower:]')
     ;;
     --ssl-mode=*)
-    SSL_MODE=$(echo "${arg#*=}" | tr '[:lower:]')
-    if [ "$SSL_MODE" != "acme" ] && [ "$SSL_MODE" != "self" ] && [ "$SSL_MODE" != "none" ] && [ "$SSL_MODE" != "auto" ]; then
-      debug "Verifying if input argument --ssl-mode is valid."
-      echo "sslmode must be one of 'ACME', 'SELF', 'AUTO' or 'NONE'."
-      display_help
-    fi
+    SSL_MODE=$(echo "${arg#*=}" | tr '[:upper:]' '[:lower:]')
+    case $SSL_MODE in
+      acme|self|none|auto)
+        # valid value, do nothing
+        ;;
+      *)
+        debug "Verifying if input argument --ssl-mode is valid."
+        echo "sslmode must be one of 'ACME', 'SELF', 'AUTO' or 'NONE'."
+        display_help
+        ;;
+    esac
     ;;
     --with-modsecurity)
     MODSECURITY="true"
     ;;
     --with-geoip=*)
-    GEOIP=$(echo "${arg#*=}" | tr '[:lower:]')
+    GEOIP=$(echo "${arg#*=}" | tr '[:upper:]' '[:lower:]')
     ;;
     --with-geoip)
     GEOIP="country"

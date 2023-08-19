@@ -1,5 +1,6 @@
 #!/command/with-contenv sh
 if [ ! -z ${MAXMIND_KEY} ]
 then
-  exec s6-setuidgid tundra /scripts/maxmind_refresh.sh
+  # exec s6-setuidgid tundra /scripts/maxmind_refresh.sh
+  exec s6-setuidgid tundra nginx-ctl maxmind-fetch
 fi

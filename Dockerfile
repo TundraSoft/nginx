@@ -70,11 +70,12 @@ RUN set -eux; \
     git clone -b master --depth 1 https://github.com/openresty/headers-more-nginx-module.git; \
     git clone -b master --depth 1 https://github.com/dstroma/nginx-upload-progress-module.git; \
     git clone -b master --depth 1 https://github.com/aperezdc/ngx-fancyindex.git; \
+    # Below are under test\
     git clone -b master --depth 1 https://github.com/cinquemb/nginx-upstream-serverlist.git; \
     git clone -b master --depth 1 https://github.com/hnlq715/status-nginx-module.git; \
-    # Below 2 are under test\
     git clone --depth 1 https://github.com/vozlt/nginx-module-vts.git; \
     git clone --depth 1 https://github.com/cubicdaiya/ngx_dynamic_upstream.git;\
+    git clone --depth 1 https://github.com/nginx-modules/ngx_http_hmac_secure_link_module.git; \
     wget https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz -O nginx-${NGINX_VERSION}.tar.gz; \
     tar -xzf nginx-${NGINX_VERSION}.tar.gz; \
     cd ./nginx-${NGINX_VERSION}; \
@@ -90,7 +91,8 @@ RUN set -eux; \
       --add-dynamic-module=../nginx-upstream-serverlist \
       --add-dynamic-module=../status-nginx-module \
       --add-dynamic-module=../nginx-module-vts \
-      --add-dynamic-module=../ngx_dynamic_upstream; \
+      --add-dynamic-module=../ngx_dynamic_upstream \
+      --add-dynamic-module=../ngx_http_hmac_secure_link_module; \
     make -j$(nproc) modules; \
     strip objs/*.so; \
     cp objs/*.so /modules/; \
@@ -132,12 +134,12 @@ ARG ALPINE_VERSION \
     CRS_VERSION \
     MOD_SECURITY_VERSION \
     NGINX_CONF_DIR=/etc/nginx \
-    NGINX_MODULES_PATH=/etc/nginx/modules \
+    NGINX_MODULES_PATH=/usr/local/nginx/modules \
     NGINX_PREFIX=/usr/local/nginx \
     NGINX_VERSION
 
-ENV ACME_SERVER='letsencrypt' \
-    ACME_EMAIL=\
+ENV ACME_EMAIL=\
+    ACME_SERVER='letsencrypt' \
     CRS_PARANOIA=1\
     CRS_BLOCKING_PARANOIA=1\
     CRS_EXECUTING_PARANOIA=${CRS_PARANOIA}\
@@ -162,9 +164,10 @@ ENV ACME_SERVER='letsencrypt' \
     CRS_ENABLE_TEST_MARKER=0\
     S6_CMD_WAIT_FOR_SERVICES_MAXTIME=0\
     CRS_REPORTING_LEVEL=2\
+    MAXMIND_DATABASE="city" \
     MAXMIND_EDITION="GeoLite2" \
     MAXMIND_KEY=\
-    MAXMIND_PATH="${NGINX_CONF_DIR}/maxmind/"\
+    MAXMIND_PATH="${NGINX_CONF_DIR}/maxmind"\
     MAXMIND_REFRESH='0 0 * * *' \
     MODSEC_AUDIT_ENGINE="RelevantOnly" \
     MODSEC_AUDIT_LOG_FORMAT=JSON \
@@ -194,11 +197,12 @@ ENV ACME_SERVER='letsencrypt' \
     MODSEC_TMP_DIR=/tmp/modsecurity/tmp \
     MODSEC_TMP_SAVE_UPLOADED_FILES="on" \
     MODSEC_UPLOAD_DIR=/tmp/modsecurity/upload \
-    NGINX_ALLOWED_SAFE_IP=\
     NGINX_CACHE_DIR=/var/cache/nginx \
     NGINX_RELOAD='*/10 * * * *' \
     NGINX_CERT_PATH=${NGINX_CONF_DIR}/certs \
+    NGINX_MAX_UPLOAD_SIZE='100M'\
     NGINX_WEBROOT=/app \
+    NGINX_WHITELIST_IP=\
     SSL_KEY_LENGTH=4096
 
 
@@ -251,21 +255,22 @@ RUN set -eux; \
     wget https://raw.githubusercontent.com/acmesh-official/acme.sh/master/acme.sh -O acme.sh; \
     chmod +x acme.sh; \
     ./acme.sh --install \
-      --home /acme \
-      --config-home /acme/config \
-      --cert-home ${NGINX_CERT_PATH} \
+      --home /app/acme \
       --log /var/log/nginx/acme.log; \
     rm -rf /tmp/*;
-
+    #   --config-home /acme/config \
+    #   --cert-home /acme/certs \
 COPY /rootfs/ /
 
 COPY --from=build /usr/local/modsecurity/lib/libmodsecurity.so.${MOD_SECURITY_VERSION} /usr/local/modsecurity/lib/
-COPY --from=build /modules/*.so /modules/
-COPY --from=build /tmp/modsecurity.conf ${NGINX_CONF_DIR}/defaults/modsecurity/
-COPY --from=build /tmp/unicode.mapping ${NGINX_CONF_DIR}/defaults/modsecurity/
-COPY --from=coreruleset /opt/owasp-crs /etc/nginx/defaults/modsecurity/owasp
+COPY --from=build /modules/*.so /${NGINX_MODULES_PATH}/
+COPY --from=build /tmp/modsecurity.conf ${NGINX_CONF_DIR}/conf.d/modsecurity/
+COPY --from=build /tmp/unicode.mapping ${NGINX_CONF_DIR}/conf.d/modsecurity/
+COPY --from=coreruleset /opt/owasp-crs /etc/nginx/conf.d/modsecurity/owasp
 
-RUN ln -s /usr/local/modsecurity/lib/libmodsecurity.so.${MOD_SECURITY_VERSION} /usr/local/modsecurity/lib/libmodsecurity.so.3.0; \
+# We move crs-setup.conf to templates for now as we set the /etc/nginx as a volume which means once updated the file cannot be updated
+RUN mv /etc/nginx/conf.d/modsecurity/owasp/crs-setup.conf /templates/crs-setup.conf.template; \
+    ln -s /usr/local/modsecurity/lib/libmodsecurity.so.${MOD_SECURITY_VERSION} /usr/local/modsecurity/lib/libmodsecurity.so.3.0; \
     ln -s /usr/local/modsecurity/lib/libmodsecurity.so.${MOD_SECURITY_VERSION} /usr/local/modsecurity/lib/libmodsecurity.so.3; \
     ln -s /usr/local/modsecurity/lib/libmodsecurity.so.${MOD_SECURITY_VERSION} /usr/local/modsecurity/lib/libmodsecurity.so;
 

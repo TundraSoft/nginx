@@ -7,7 +7,7 @@ then
   for template in 'maxmind-city.conf.template' 'maxmind-country.conf.template'
   do
     echo "[info] Enabling ${template}"
-    envsubst < /templates/${template} > /etc/nginx/defaults/${template//.template}
+    envsubst < /templates/${template} > /etc/nginx/conf.d/${template//.template}
   done
 fi
 
@@ -19,7 +19,7 @@ SERVER=${ACME_SERVER:-'letsencrypt'}
 if [ ! -z ${ACME_EMAIL} ]
 then
   echo "[info] Configuring acme with email ${ACME_EMAIL} and server ${SERVER}"
-  output=$(/acme/acme.sh --home /acme/ --register-account --server ${SERVER} -m ${ACME_EMAIL})
+  output=$(acme --register-account --server ${SERVER} -m ${ACME_EMAIL})
 
   # Extract the value of ACCOUNT_THUMBPRINT from the output using grep and awk
   ACCOUNT_THUMBPRINT=$(echo "$output" | grep "ACCOUNT_THUMBPRINT" | awk -F "'" '{print $2}')
@@ -29,4 +29,4 @@ fi
 export "ACME_THUMBPRINT=${ACCOUNT_THUMBPRINT}"
 
 echo "[info] Setting default site config"
-envsubst < /templates/default.conf.template > /etc/nginx/sites.d/0-default.conf
+# envsubst < /templates/default.conf.template > /etc/nginx/sites.d/0-default.conf

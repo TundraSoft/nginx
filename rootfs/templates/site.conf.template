@@ -24,7 +24,6 @@ server {
   #ssl_certificate_key /etc/nginx/certs/$server_name/certificate.key;
 
   #include /etc/nginx/defaults/ssl-config.conf;
-
   include /etc/nginx/defaults/security-headers.conf;
 
   ###################################################
@@ -33,6 +32,8 @@ server {
   #if ($host ~ ^www\.) {
   #   return 301 https://$primary_domain$request_uri;
   #}
+
+  root /app/$server_name;
 
   proxy_set_header Host $host;    
   proxy_set_header Proxy "";
@@ -51,40 +52,15 @@ server {
 
   proxy_pass_header Authorization;
 
-  ###################################################
-  # Some funky Locations
-  # These are optional and can be removed
-  ###################################################
-  # server stub status
-  location = /healthz {
-    # allow IP_ADDRESS;
-    # deny all;
-    access_log off;
-    stub_status;
-  }
-
-  # Simple ping pong status
-  location = /ping {
-    access_log off;
-    add_header Content-Type text/plain;
-    return 200 "pong";
-  }
-
-  # Prevent faveicon (assuming not present)
-  location = /favicon.ico {
-    try_files $uri =404;
-    log_not_found off;
-    access_log off;
-  }
-  
   ########################################
   # Extras
   ########################################
-  include /etc/nginx/defaults/accounting.conf;
   include /etc/nginx/defaults/fancy-index-flat.conf;
-  #include /etc/nginx/defaults/maxmind-city.conf;
-  #include /etc/nginx/defaults/maxmind-country.conf;
+  #include /etc/nginx/defaults/maxmind.conf;
   #include /etc/nginx/defaults/modsecurity.conf;
+
+  # Disable this if you do not want to enable /status, /healthz or /ping
+  include /etc/nginx/conf.d/site-default-locations.conf;
 
   ########################################
   # Serve

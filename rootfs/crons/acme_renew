@@ -1,0 +1,1 @@
+0 0 * * * refreshNginx >> /var/log/nginx/nginx_reload.log 2>&1
