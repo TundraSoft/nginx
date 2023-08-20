@@ -1,1 +1,1 @@
-$NGINX_RELOAD refreshNginx >> /var/log/nginx/nginx_reload.log 2>&1
+$NGINX_RELOAD nginx-ctl reload >> /var/log/nginx/nginx_reload.log 2>&1

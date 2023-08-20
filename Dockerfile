@@ -63,7 +63,6 @@ RUN set -eux; \
 RUN set -eux; \
     mkdir /modules; \
     git clone -b master --depth 1 https://github.com/slact/nchan.git; \
-    git clone -b master --depth 1 https://github.com/Lax/traffic-accounting-nginx-module.git; \
     git clone -b master --depth 1 https://github.com/leev/ngx_http_geoip2_module.git; \
     git clone -b master --depth 1 https://github.com/SpiderLabs/ModSecurity-nginx.git; \
     git clone -b master --depth 1 https://github.com/nicholaschiasson/ngx_upstream_jdomain.git; \
@@ -72,9 +71,9 @@ RUN set -eux; \
     git clone -b master --depth 1 https://github.com/aperezdc/ngx-fancyindex.git; \
     # Below are under test\
     git clone -b master --depth 1 https://github.com/cinquemb/nginx-upstream-serverlist.git; \
-    git clone -b master --depth 1 https://github.com/hnlq715/status-nginx-module.git; \
+    # git clone -b master --depth 1 https://github.com/hnlq715/status-nginx-module.git; \
     git clone --depth 1 https://github.com/vozlt/nginx-module-vts.git; \
-    git clone --depth 1 https://github.com/cubicdaiya/ngx_dynamic_upstream.git;\
+    # git clone --depth 1 https://github.com/cubicdaiya/ngx_dynamic_upstream.git;\
     git clone --depth 1 https://github.com/nginx-modules/ngx_http_hmac_secure_link_module.git; \
     wget https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz -O nginx-${NGINX_VERSION}.tar.gz; \
     tar -xzf nginx-${NGINX_VERSION}.tar.gz; \
@@ -89,20 +88,12 @@ RUN set -eux; \
       --add-dynamic-module=../nginx-upload-progress-module \
       --add-dynamic-module=../ngx-fancyindex \
       --add-dynamic-module=../nginx-upstream-serverlist \
-      --add-dynamic-module=../status-nginx-module \
       --add-dynamic-module=../nginx-module-vts \
-      --add-dynamic-module=../ngx_dynamic_upstream \
       --add-dynamic-module=../ngx_http_hmac_secure_link_module; \
     make -j$(nproc) modules; \
     strip objs/*.so; \
     cp objs/*.so /modules/; \
-    rm -rf objs/*; \
-    ./configure --with-compat \
-      --add-dynamic-module=../traffic-accounting-nginx-module; \
-    make -j$(nproc) modules; \
-    strip objs/*.so; \
-    cp objs/*.so /modules/; \
-    cd /modules;
+    rm -rf objs/*;
 
 # Core Rule set
 FROM tundrasoft/alpine:latest as coreruleset
@@ -257,9 +248,9 @@ RUN set -eux; \
     ./acme.sh --install \
       --home /app/acme \
       --log /var/log/nginx/acme.log; \
-    rm -rf /tmp/*;
-    #   --config-home /acme/config \
-    #   --cert-home /acme/certs \
+    rm -rf /tmp/*; \
+    rm -rf /etc/nginx;
+
 COPY /rootfs/ /
 
 COPY --from=build /usr/local/modsecurity/lib/libmodsecurity.so.${MOD_SECURITY_VERSION} /usr/local/modsecurity/lib/

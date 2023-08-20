@@ -8,7 +8,7 @@ worker_processes  auto;
 # Modules
 include /etc/nginx/conf.d/modules.conf;
 
-error_log  /var/log/nginx/$hostname-error.log warn;
+error_log  /var/log/nginx/error.log warn;
 pid        /var/run/nginx.pid;
 
 events {
@@ -26,20 +26,22 @@ http {
 
   include /etc/nginx/conf.d/log-formats.conf;
 
-  access_log                      /var/log/nginx/$hostname-access-$log_name.log  main;
-  error_log                       /var/log/nginx/$hostname-error-$log_name.log;
+  access_log                      /var/log/nginx/access.log  main;
+  error_log                       /var/log/nginx/error.log;
 
   sendfile on;
   tcp_nopush                      on;
   tcp_nodelay                     on;
   keepalive_timeout               65;
   types_hash_max_size             2048;
-  #client_max_body_size           ${OPT_NGINX_MAX_BODY_SIZE};
+  client_max_body_size            ${OPT_NGINX_MAX_BODY_SIZE};
 
   include /etc/nginx/conf.d/default-gzip.conf;
 
   #include /etc/nginx/defaults/accounting.conf;
   #include /etc/nginx/conf.d/maxmind.conf;
+  vhost_traffic_status_zone;
+  #vhost_traffic_status_filter_by_set_key $geoip_country_code country::*;
 
   server {
     listen          80      default_server;

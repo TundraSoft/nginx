@@ -1,1 +1,1 @@
-$MAXMIND_REFRESH refreshMaxmind >> /var/log/nginx/maxmind_refresh.log 2>&1
+$MAXMIND_REFRESH nginx-ctl maxmind-fetch >> /var/log/nginx/maxmind_refresh.log 2>&1

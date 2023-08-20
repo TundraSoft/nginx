@@ -7,7 +7,7 @@ NGINX_SITE_PATH=/etc/nginx/sites.d
 NGINX_MODULES_PATH=/usr/local/nginx/modules
 NGINX_CERT_PATH=${NGINX_CONF_PATH}/certs
 NGINX_WEBROOT=/app/web
-NGINX_CACHE_DIR=/var/cache/nginx
+NGINX_CACHE_PATH=/var/cache/nginx
 MAXMIND_PATH=${NGINX_CONF_PATH}/maxmind
 ACME_HOME=/app/acme
 # End Paths & Non Editable section
