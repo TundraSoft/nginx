@@ -1,6 +1,7 @@
 #!/bin/sh
 # Paths
 # DO NOT EDIT THESE
+ACME_HOME=/app/acme
 NGINX_CONF_PATH=/etc/nginx
 NGINX_SITES_CONFIG=/etc/nginx/sites.json
 NGINX_SITE_PATH=/etc/nginx/sites.d
@@ -10,7 +11,6 @@ NGINX_WEBROOT_PATH=/app/web
 NGINX_CACHE_PATH=/var/cache/nginx
 NGINX_LOG_PATH=/var/log/nginx
 MAXMIND_PATH=${NGINX_CONF_PATH}/maxmind
-ACME_HOME=/app/acme
 MODSEC_AUDIT_STORAGE=${MODSEC_AUDIT_STORAGE:-/var/log/nginx/modsecurity/}
 MODSEC_DATA_DIR=${MODSEC_AUDIT_STORAGE:-/tmp/modsecurity/data}
 MODSEC_TMP_DIR=${MODSEC_TMP_DIR:-/tmp/modsecurity/tmp}
@@ -22,6 +22,9 @@ MODSEC_UPLOAD_DIR=${MODSEC_UPLOAD_DIR:-/tmp/modsecurity/upload}
 # Supports comma seperated list example 1.1.1.1,10.0.0.0/24
 # If none mentioned then you wont be able to access the sensitive parts!
 OPT_NGINX_WHITELIST_IP=${NGINX_WHITELIST_IP:-}
+if [ -f /run/secrets/NGINX_WHITELIST_IP ]; then
+  OPT_MAXMIND_KEY=$(cat /run/secrets/NGINX_WHITELIST_IP)
+fi
 
 # Max body size (client upload) Can and should be overriden in server block
 OPT_NGINX_MAX_BODY_SIZE=${NGINX_MAX_UPLOAD_SIZE:-'100M'}
