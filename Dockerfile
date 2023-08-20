@@ -124,7 +124,7 @@ LABEL maintainer="Abhinav A V <abhai2k@gmail.com>"
 ARG ALPINE_VERSION \
     CRS_VERSION \
     MOD_SECURITY_VERSION \
-    NGINX_CONF_DIR=/etc/nginx \
+    NGINX_CONF_PATH=/etc/nginx \
     NGINX_MODULES_PATH=/usr/local/nginx/modules \
     NGINX_PREFIX=/usr/local/nginx \
     NGINX_VERSION
@@ -158,7 +158,7 @@ ENV ACME_EMAIL=\
     MAXMIND_DATABASE="city" \
     MAXMIND_EDITION="GeoLite2" \
     MAXMIND_KEY=\
-    MAXMIND_PATH="${NGINX_CONF_DIR}/maxmind"\
+    MAXMIND_PATH="/etc/nginx/maxmind"\
     MAXMIND_REFRESH='0 0 * * *' \
     MODSEC_AUDIT_ENGINE="RelevantOnly" \
     MODSEC_AUDIT_LOG_FORMAT=JSON \
@@ -188,11 +188,8 @@ ENV ACME_EMAIL=\
     MODSEC_TMP_DIR=/tmp/modsecurity/tmp \
     MODSEC_TMP_SAVE_UPLOADED_FILES="on" \
     MODSEC_UPLOAD_DIR=/tmp/modsecurity/upload \
-    NGINX_CACHE_DIR=/var/cache/nginx \
     NGINX_RELOAD='*/10 * * * *' \
-    NGINX_CERT_PATH=${NGINX_CONF_DIR}/certs \
     NGINX_MAX_UPLOAD_SIZE='100M'\
-    NGINX_WEBROOT=/app \
     NGINX_WHITELIST_IP=\
     SSL_KEY_LENGTH=4096
 
@@ -223,7 +220,7 @@ RUN set -eux; \
     cd nginx-${NGINX_VERSION}; \
     ./configure --with-compat \
       --prefix=${NGINX_PREFIX} \
-      --conf-path=${NGINX_CONF_DIR}/nginx.conf \
+      --conf-path=${NGINX_CONF_PATH}/nginx.conf \
       --modules-path=${NGINX_MODULES_PATH} \
       --http-log-path=/var/log/nginx/access.log \
       --error-log-path=/var/log/nginx/error.log \
@@ -255,8 +252,8 @@ COPY /rootfs/ /
 
 COPY --from=build /usr/local/modsecurity/lib/libmodsecurity.so.${MOD_SECURITY_VERSION} /usr/local/modsecurity/lib/
 COPY --from=build /modules/*.so /${NGINX_MODULES_PATH}/
-COPY --from=build /tmp/modsecurity.conf ${NGINX_CONF_DIR}/conf.d/modsecurity/
-COPY --from=build /tmp/unicode.mapping ${NGINX_CONF_DIR}/conf.d/modsecurity/
+COPY --from=build /tmp/modsecurity.conf ${NGINX_CONF_PATH}/conf.d/modsecurity/
+COPY --from=build /tmp/unicode.mapping ${NGINX_CONF_PATH}/conf.d/modsecurity/
 COPY --from=coreruleset /opt/owasp-crs /etc/nginx/conf.d/modsecurity/owasp
 
 # We move crs-setup.conf to templates for now as we set the /etc/nginx as a volume which means once updated the file cannot be updated

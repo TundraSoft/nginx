@@ -1,5 +1,6 @@
 #!/command/with-contenv sh
 if [ -f /var/log/nginx/nginx-ctl.lock ]; then
+  # Waut for configuration to finish
   while [ -f /var/log/nginx/nginx-ctl.lock ]; do
     sleep 5
   done

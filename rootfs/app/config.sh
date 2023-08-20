@@ -6,10 +6,15 @@ NGINX_SITES_CONFIG=/etc/nginx/sites.json
 NGINX_SITE_PATH=/etc/nginx/sites.d
 NGINX_MODULES_PATH=/usr/local/nginx/modules
 NGINX_CERT_PATH=${NGINX_CONF_PATH}/certs
-NGINX_WEBROOT=/app/web
+NGINX_WEBROOT_PATH=/app/web
 NGINX_CACHE_PATH=/var/cache/nginx
+NGINX_LOG_PATH=/var/log/nginx
 MAXMIND_PATH=${NGINX_CONF_PATH}/maxmind
 ACME_HOME=/app/acme
+MODSEC_AUDIT_STORAGE=${MODSEC_AUDIT_STORAGE:-/var/log/nginx/modsecurity/}
+MODSEC_DATA_DIR=${MODSEC_AUDIT_STORAGE:-/tmp/modsecurity/data}
+MODSEC_TMP_DIR=${MODSEC_TMP_DIR:-/tmp/modsecurity/tmp}
+MODSEC_UPLOAD_DIR=${MODSEC_UPLOAD_DIR:-/tmp/modsecurity/upload}
 # End Paths & Non Editable section
 
 # Nginx config

@@ -20,14 +20,14 @@ server {
 
   #listen 443 ssl;
   #listen [::]:443 ssl;
-  #ssl_certificate /etc/nginx/certs/$server_name/certificate.crt;
-  #ssl_certificate_key /etc/nginx/certs/$server_name/certificate.key;
+  #ssl_certificate /etc/nginx/certs/$primary_domain/certificate.crt;
+  #ssl_certificate_key /etc/nginx/certs/$primary_domain/certificate.key;
 
   #include /etc/nginx/conf.d/ssl-config.conf;
   include /etc/nginx/conf.d/default-security-headers.conf;
 
-  access_log                      /var/log/nginx/$primary_domain/access.log  main;
-  error_log                       /var/log/nginx/$PRIMARY_DOMAIN/error.log;
+  access_log                      /var/log/nginx/$primary_domain/access-$log_date.log  main;
+  error_log                       /var/log/nginx/$primary_domain/error.log;
   root                            /app/$primary_domain;
   ###################################################
   # www -> no www redirect
@@ -56,11 +56,7 @@ server {
   ########################################
   # Extras
   ########################################
-  include /etc/nginx/conf.d/fancy-index-flat.conf;
   #include /etc/nginx/conf.d/modsecurity.conf;
-
-  # Disable this if you do not want to enable /status, /healthz or /ping
-  include /etc/nginx/conf.d/site-default-locations.conf;
 
   ########################################
   # Serve
@@ -77,9 +73,19 @@ server {
   
   # Deny all attempts to access hidden files
   # such as .htaccess, .htpasswd, .DS_Store (Mac).
-  location ~ /\. {
-    deny all;
+  ## Disable .htaccess and other hidden files
+  location ~ /\.(?!well-known).* {
+      deny all;
+      access_log off;
+      log_not_found off;
+      return 404;
   }
+
+  # set default locations. Comment them if you do not want to use them
+  include /etc/nginx/conf.d/default-location-healthz.conf;
+  include /etc/nginx/conf.d/default-location-ping.conf;
+  include /etc/nginx/conf.d/fancy-index-flat.conf;
+  include /etc/nginx/conf.d/default-location-faveico.conf;
 
   location / {
     root /app/$primary_domain;
