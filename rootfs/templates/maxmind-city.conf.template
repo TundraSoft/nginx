@@ -10,7 +10,7 @@ geoip2 /etc/nginx/maxmind/maxmind.mmdb {
     $geoip_timezone         location time_zone;
     $geoip_state_code       subdivisions iso_code;
     $geoip_state_name       subdivisions names en;
-    $geoip_city_name        name en
+    $geoip_city_name        name en;
     $geoip_lat              location latitude;
     $geoip_long             location longitude;
     $geoip_latlong_radius   location accuracy_radius;

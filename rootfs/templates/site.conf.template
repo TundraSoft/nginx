@@ -27,7 +27,7 @@ server {
   include /etc/nginx/conf.d/default-security-headers.conf;
 
   access_log                      /var/log/nginx/$primary_domain/access-$log_date.log  main;
-  error_log                       /var/log/nginx/$primary_domain/error.log;
+  error_log                       /var/log/nginx/$PRIMARY_DOMAIN/error.log;
   root                            /app/$primary_domain;
   ###################################################
   # www -> no www redirect

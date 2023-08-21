@@ -86,8 +86,8 @@ usage() {
   echo "-------------------------------------------------------------------------------"
   echo "                                  NGINX                                        "
   echo "-------------------------------------------------------------------------------"
-  # echo
-  # echo "  ensure-permissions              Ensure all folders are having the right permissions"
+  echo
+  echo "  initialize                      Ensure all folders are present and having the right permissions"
   echo 
   echo "  configure                       Configure base nginx server"
   echo
@@ -166,7 +166,7 @@ usage() {
 
 # NGINX management
 # command_ensure_permissions() {
-check_folders() {
+command_initialize() {
   # Set nginx folder permission
   # chown -R ${UNAME}:${GNAME} /usr/local/nginx
   # Create nginx.pid if missing
@@ -184,7 +184,7 @@ check_folders() {
   setgroup /etc/nginx
   setgroup /usr/local/nginx
 
-  for i in /app/acme /templates ${MAXMIND_PATH} ${MODSEC_AUDIT_STORAGE} ${MODSEC_DATA_DIR} ${MODSEC_TMP_DIR} ${MODSEC_UPLOAD_DIR} ${NGINX_CACHE_DIR} ${NGINX_CERT_PATH} ${NGINX_WEBROOT} ${NGINX_LOG_PATH} /scripts 
+  for i in /app /templates ${MAXMIND_PATH} ${MODSEC_AUDIT_STORAGE} ${MODSEC_DATA_DIR} ${MODSEC_TMP_DIR} ${MODSEC_UPLOAD_DIR} ${NGINX_CACHE_DIR} ${NGINX_CERT_PATH} ${NGINX_LOG_PATH} /scripts 
   do
     if [ ! -d "${i}" ]
     then
@@ -196,10 +196,18 @@ check_folders() {
   done
 }
 
+ensure_permissions() {
+  for dir in /app /templates ${NGINX_CONF_PATH} ${NGINX_LOG_PATH}
+  do
+    INFO "Updating permissions for ${dir}"
+    setgroup ${dir}
+  done
+}
+
 command_configure() {
   WARN "Running nginx configuration! All settings will be reset. Site configuration etc will not be affected."
   WARN "This should mainly be run when starting a container"
-  check_folders
+  command_initialize
   # Pre Configure tasks
   # Maxmind
   if [ "${OPT_MAXMIND_KEY}" != "" ] && [ ! -f ${MAXMIND_PATH}/maxmind.mmdb ]; then
@@ -267,7 +275,7 @@ command_configure() {
   DEBUG "Modsecurity configuration completed"
 
   # NGINX.conf
-  export NGINX_CACHE_PATH=$NGINX_CACHE_PATH, OPT_NGINX_MAX_BODY_SIZE=$OPT_NGINX_MAX_BODY_SIZE
+  export NGINX_CACHE_PATH=$NGINX_CACHE_PATH OPT_NGINX_MAX_BODY_SIZE=$OPT_NGINX_MAX_BODY_SIZE
   envsubst '$NGINX_CACHE_PATH,$OPT_NGINX_MAX_BODY_SIZE' < /templates/nginx.conf.template > /tmp/config/nginx.conf
   # Substitude 
   DEBUG "Replacing/Enabling basis config"
@@ -296,8 +304,11 @@ command_configure() {
   cp -f /tmp/config/conf.d/*.conf ${NGINX_CONF_PATH}/conf.d/
   cp -f /tmp/config/modsecurity-override.conf ${NGINX_CONF_PATH}/conf.d/modsecurity/
   cp -f /tmp/config/crs-setup.conf ${NGINX_CONF_PATH}/conf.d/modsecurity/owasp/
+  
+  DEBUG "Setting permissions"
+  ensure_permissions
 
-  if ! nginx -t; then
+  if ! su -s /bin/sh -c 'nginx -t' tundra; then
     # Config is valid, lets reload
    ERROR "NGINX config is not valid."
   fi
@@ -305,29 +316,43 @@ command_configure() {
 }
 
 command_reload() {
-  local CONFIG_HASH=$(nginx -T | sha512sum | sed "s/ *\-$//")
-  local HASH_FILE=/tmp/nginx.hash
-  local CURRENT_HASH=
-  if [ -f "${HASH_FILE}" ]; then
-    # Load the value
-    CURRENT_HASH=$(cat ${HASH_FILE})
-  fi
-  DEBUG "Config Hash    : ${CONFIG_HASH}"
-  DEBUG "Current Hash   : ${CURRENT_HASH}"
-  DEBUG "Force Flag     : ${OPT_FORCE}"
-  if [ "$CURRENT_HASH" != $CONFIG_HASH ] || [ "$OPT_FORCE" == 1 ]; then
-    # Ok Validate the new config
-    if [ $(nginx -t) -eq 0 ]; then
-      # Config is valid, lets reload
-      if ! nginx -s reload; then
-        ERROR "Failed to reload NGINX config"
+  if [ $(whoami) == "root" ]; then
+    local CONFIG_HASH=$(su -s /bin/sh -c 'nginx -T' tundra | sha512sum | sed "s/ *\-$//")
+    local HASH_FILE=/tmp/nginx.hash
+    local CURRENT_HASH=
+    if [ -f "${HASH_FILE}" ]; then
+      # Load the value
+      CURRENT_HASH=$(cat ${HASH_FILE})
+    fi
+    DEBUG "Config Hash    : ${CONFIG_HASH}"
+    DEBUG "Current Hash   : ${CURRENT_HASH}"
+    DEBUG "Force Flag     : ${OPT_FORCE}"
+    if [ "$CURRENT_HASH" != $CONFIG_HASH ] || [ "$OPT_FORCE" == 1 ]; then
+      if ! su -s /bin/sh -c 'nginx -t' tundra; then
+        ERROR "Invalid nginx config. Ignoring changes."
       fi
-      # Remove old file
-      rm -f ${HASH_FILE}
-      echo $CONFIG_HASH > ${HASH_FILE}
-    else
-      # Config is not valid, lets ignore
-      ERROR "NGINX config is not valid. Ignoring changes..."
+      if ! su -s /bin/sh -c 'nginx -s reload' tundra; then
+        ERROR "Failed to reload nginx config"
+      fi
+    fi
+  else
+    local CONFIG_HASH=$(nginx -T | sha512sum | sed "s/ *\-$//")
+    local HASH_FILE=/tmp/nginx.hash
+    local CURRENT_HASH=
+    if [ -f "${HASH_FILE}" ]; then
+      # Load the value
+      CURRENT_HASH=$(cat ${HASH_FILE})
+    fi
+    DEBUG "Config Hash    : ${CONFIG_HASH}"
+    DEBUG "Current Hash   : ${CURRENT_HASH}"
+    DEBUG "Force Flag     : ${OPT_FORCE}"
+    if [ "$CURRENT_HASH" != $CONFIG_HASH ] || [ "$OPT_FORCE" == 1 ]; then
+      if ! nginx -t; then
+        ERROR "Invalid nginx config. Ignoring changes."
+      fi
+      if ! nginx -s reload; then
+        ERROR "Failed to reload nginx config"
+      fi
     fi
   fi
 }
@@ -336,6 +361,8 @@ command_dhparams() {
   if [ ! -f ${NGINX_CONF_PATH}/dhparam.pem ]; then
     INFO "Generating dhparams.pem with key length: ${OPT_SSL_KEY_LENGTH}"
     openssl dhparam -dsaparam -out ${NGINX_CONF_PATH}/dhparam.pem ${OPT_SSL_KEY_LENGTH};
+    # Set permission
+    setgroup ${NGINX_CONF_PATH}/dhparam.pem
   fi
 }
 
@@ -354,7 +381,6 @@ command_list_sites() {
 }
 
 command_add_site() {
-
   if [ "${OPT_PRIMARY_DOMAIN}" == "" ]; then
     ERROR "Atleast one value for domain must be passed"
   fi
@@ -374,7 +400,7 @@ command_add_site() {
   mkdir -p ${NGINX_CACHE_PATH}/${OPT_PRIMARY_DOMAIN}
 
   # Create the file
-  export PRIMARY_DOMAIN=$OPT_PRIMARY_DOMAIN, ALL_DOMAINS=$OPT_DOMAINS, NGINX_CACHE_PATH=$NGINX_CACHE_PATH
+  export PRIMARY_DOMAIN=$OPT_PRIMARY_DOMAIN ALL_DOMAINS=$OPT_DOMAINS NGINX_CACHE_PATH=$NGINX_CACHE_PATH
   envsubst '$PRIMARY_DOMAIN, $ALL_DOMAINS, $NGINX_CACHE_PATH' < /templates/site.conf.template > ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
 
   if [ -f ${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN}/certificate.key ] && [ -f ${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN}/certificate.crt ];
@@ -393,7 +419,11 @@ command_add_site() {
   fi
 
   INFO "Ensuring right permissions are present"
-  setgroup ${NGINX_WEBROOT_PATH}/${OPT_PRIMARY_DOMAIN} ${NGINX_LOG_PATH}/${OPT_PRIMARY_DOMAIN} ${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN} ${NGINX_CACHE_PATH}/${OPT_PRIMARY_DOMAIN} ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
+  setgroup ${NGINX_WEBROOT_PATH}/${OPT_PRIMARY_DOMAIN} 
+  setgroup ${NGINX_LOG_PATH}/${OPT_PRIMARY_DOMAIN} 
+  setgroup ${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN} 
+  setgroup ${NGINX_CACHE_PATH}/${OPT_PRIMARY_DOMAIN} 
+  setgroup ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
   
   # if ! nginx -t; then
   #   ERROR "Error with nginx configuration file! Skipping reload..."
@@ -416,6 +446,7 @@ command_disable_site() {
   else
     ERROR "Site configuration for ${OPT_PRIMARY_DOMAIN} not found"
   fi
+  setgroup ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf.disabled
   # if ! nginx -t; then
   #   ERROR "Error with nginx configuration file! Skipping reload..."
   # fi
@@ -437,16 +468,18 @@ command_enable_site() {
   else
     ERROR "Site configuration for ${OPT_PRIMARY_DOMAIN} not found"
   fi
+  setgroup ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
   # if ! nginx -t; then
   #   ERROR "Error with nginx configuration file! Skipping reload..."
   # fi
   # nginx -s reload
   command_reload
 }
+
 # Modsecurity
 configure_modsecurity() {
   DEBUG "Setup overrides"
-  export OPT_MODSEC_AUDIT_ENGINE=$OPT_MODSEC_AUDIT_ENGINE,OPT_MODSEC_AUDIT_LOG=$OPT_MODSEC_AUDIT_LOG,OPT_MODSEC_AUDIT_LOG_FORMAT=$OPT_MODSEC_AUDIT_LOG_FORMAT,OPT_MODSEC_AUDIT_LOG_PARTS=$OPT_MODSEC_AUDIT_LOG_PARTS,OPT_MODSEC_AUDIT_STORAGE=$OPT_MODSEC_AUDIT_STORAGE,OPT_MODSEC_AUDIT_LOG_TYPE=$OPT_MODSEC_AUDIT_LOG_TYPE,OPT_MODSEC_DATA_DIR=$OPT_MODSEC_DATA_DIR, OPT_MODSEC_DEBUG_LOG=$OPT_MODSEC_DEBUG_LOG,OPT_MODSEC_DEBUG_LOGLEVEL=$OPT_MODSEC_DEBUG_LOGLEVEL,OPT_MODSEC_PCRE_MATCH_LIMIT=$OPT_MODSEC_PCRE_MATCH_LIMIT,OPT_MODSEC_PCRE_MATCH_LIMIT_RECURSION=$OPT_MODSEC_PCRE_MATCH_LIMIT_RECURSION, OPT_MODSEC_REQ_BODY_ACCESS=$OPT_MODSEC_REQ_BODY_ACCESS,OPT_MODSEC_REQ_BODY_LIMIT=$OPT_MODSEC_REQ_BODY_LIMIT,OPT_MODSEC_REQ_BODY_JSON_DEPTH_LIMIT=$OPT_MODSEC_REQ_BODY_JSON_DEPTH_LIMIT,OPT_MODSEC_REQ_BODY_LIMIT_ACTION=$OPT_MODSEC_REQ_BODY_LIMIT_ACTION, OPT_MODSEC_REQ_BODY_NOFILES_LIMIT=$OPT_MODSEC_REQ_BODY_NOFILES_LIMIT,OPT_MODSEC_RESP_BODY_ACCESS=$OPT_MODSEC_RESP_BODY_ACCESS,OPT_MODSEC_RESP_BODY_LIMIT=$OPT_MODSEC_RESP_BODY_LIMIT,OPT_MODSEC_RESP_BODY_LIMIT_ACTION=$OPT_MODSEC_RESP_BODY_LIMIT_ACTION, OPT_MODSEC_RESP_BODY_MIMETYPE=$OPT_MODSEC_RESP_BODY_MIMETYPE,OPT_MODSEC_RULE_ENGINE=$OPT_MODSEC_RULE_ENGINE,OPT_MODSEC_STATUS_ENGINE=$OPT_MODSEC_STATUS_ENGINE,OPT_MODSEC_TMP_DIR=$OPT_MODSEC_TMP_DIR,OPT_MODSEC_TMP_SAVE_UPLOADED_FILES=$OPT_MODSEC_TMP_SAVE_UPLOADED_FILES,OPT_MODSEC_UPLOAD_DIR=$OPT_MODSEC_UPLOAD_DIR
+  export OPT_MODSEC_AUDIT_ENGINE=$OPT_MODSEC_AUDIT_ENGINE OPT_MODSEC_AUDIT_LOG=$OPT_MODSEC_AUDIT_LOG OPT_MODSEC_AUDIT_LOG_FORMAT=$OPT_MODSEC_AUDIT_LOG_FORMAT OPT_MODSEC_AUDIT_LOG_PARTS=$OPT_MODSEC_AUDIT_LOG_PARTS OPT_MODSEC_AUDIT_STORAGE=$OPT_MODSEC_AUDIT_STORAGE OPT_MODSEC_AUDIT_LOG_TYPE=$OPT_MODSEC_AUDIT_LOG_TYPE OPT_MODSEC_DATA_DIR=$OPT_MODSEC_DATA_DIR OPT_MODSEC_DEBUG_LOG=$OPT_MODSEC_DEBUG_LOG OPT_MODSEC_DEBUG_LOGLEVEL=$OPT_MODSEC_DEBUG_LOGLEVEL OPT_MODSEC_PCRE_MATCH_LIMIT=$OPT_MODSEC_PCRE_MATCH_LIMIT OPT_MODSEC_PCRE_MATCH_LIMIT_RECURSION=$OPT_MODSEC_PCRE_MATCH_LIMIT_RECURSION OPT_MODSEC_REQ_BODY_ACCESS=$OPT_MODSEC_REQ_BODY_ACCESS OPT_MODSEC_REQ_BODY_LIMIT=$OPT_MODSEC_REQ_BODY_LIMIT OPT_MODSEC_REQ_BODY_JSON_DEPTH_LIMIT=$OPT_MODSEC_REQ_BODY_JSON_DEPTH_LIMIT OPT_MODSEC_REQ_BODY_LIMIT_ACTION=$OPT_MODSEC_REQ_BODY_LIMIT_ACTION OPT_MODSEC_REQ_BODY_NOFILES_LIMIT=$OPT_MODSEC_REQ_BODY_NOFILES_LIMIT OPT_MODSEC_RESP_BODY_ACCESS=$OPT_MODSEC_RESP_BODY_ACCESS OPT_MODSEC_RESP_BODY_LIMIT=$OPT_MODSEC_RESP_BODY_LIMIT OPT_MODSEC_RESP_BODY_LIMIT_ACTION=$OPT_MODSEC_RESP_BODY_LIMIT_ACTION OPT_MODSEC_RESP_BODY_MIMETYPE=$OPT_MODSEC_RESP_BODY_MIMETYPE OPT_MODSEC_RULE_ENGINE=$OPT_MODSEC_RULE_ENGINE OPT_MODSEC_STATUS_ENGINE=$OPT_MODSEC_STATUS_ENGINE OPT_MODSEC_TMP_DIR=$OPT_MODSEC_TMP_DIR OPT_MODSEC_TMP_SAVE_UPLOADED_FILES=$OPT_MODSEC_TMP_SAVE_UPLOADED_FILES OPT_MODSEC_UPLOAD_DIR=$OPT_MODSEC_UPLOAD_DIR
   envsubst '$OPT_MODSEC_AUDIT_ENGINE, $OPT_MODSEC_AUDIT_LOG, $OPT_MODSEC_AUDIT_LOG_FORMAT, $OPT_MODSEC_AUDIT_LOG_PARTS, $OPT_MODSEC_AUDIT_STORAGE, $OPT_MODSEC_AUDIT_LOG_TYPE, $OPT_MODSEC_DATA_DIR, $OPT_MODSEC_DEBUG_LOG,$OPT_MODSEC_DEBUG_LOGLEVEL,$OPT_MODSEC_PCRE_MATCH_LIMIT, $OPT_MODSEC_PCRE_MATCH_LIMIT_RECURSION, $OPT_MODSEC_REQ_BODY_ACCESS, $OPT_MODSEC_REQ_BODY_LIMIT, $OPT_MODSEC_REQ_BODY_JSON_DEPTH_LIMIT, $OPT_MODSEC_REQ_BODY_LIMIT_ACTION, $OPT_MODSEC_REQ_BODY_NOFILES_LIMIT, $OPT_MODSEC_RESP_BODY_ACCESS, $OPT_MODSEC_RESP_BODY_LIMIT, $OPT_MODSEC_RESP_BODY_LIMIT_ACTION, $OPT_MODSEC_RESP_BODY_MIMETYPE, $OPT_MODSEC_RULE_ENGINE, $OPT_MODSEC_STATUS_ENGINE, $OPT_MODSEC_TMP_DIR, $OPT_MODSEC_TMP_SAVE_UPLOADED_FILES, $OPT_MODSEC_UPLOAD_DIR' < /templates/modsecurity-override.conf.template > /tmp/config/modsecurity-override.conf
 
   # Lets build owasp
@@ -687,9 +720,11 @@ command_maxmind_fetch() {
   if [ -f "${MAXMIND_PATH}/maxmind.mmdb" ] && [ ${OPT_BACKUP} == 1 ]; then
     DEBUG "Maxmind - Backing up existing db file"
     mv "${MAXMIND_PATH}/maxmind.mmdb" "${MAXMIND_PATH}/maxmind-$(date +%Y-%m-%d).mmdb"
+    setgroup "${MAXMIND_PATH}/maxmind-$(date +%Y-%m-%d).mmdb"
   fi
   DEBUG "Maxmind - Moving the file to ${MAXMIND_PATH}/maxmind.mmdb"
   mv -f /tmp/maxmind/maxmind.mmdb "${MAXMIND_PATH}/maxmind.mmdb"
+  setgroup "${MAXMIND_PATH}/maxmind.mmdb"
   rm /tmp/${DOWNLOAD_FILE}.tar.gz
   rm -rf /tmp/maxmind
 }
@@ -816,5 +851,10 @@ if [ ${COMMAND} == 'issue' ] || [ ${COMMAND} == 'renew' ]; then
 fi
 
 init
+if [ "${COMMAND}" == "initialize" ]; then
+  if [ $(whoami) != "root" ]; then
+    ERROR "Initialize and Configure must be run as root! Please rerun with root privilages"
+  fi
+fi
 "command_${COMMAND}" || cleanup
 cleanup

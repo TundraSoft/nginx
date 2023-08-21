@@ -4,6 +4,7 @@
 # THIS SECTION IS GENERATED AT RUNTIME!                                       #
 # DO NOT EDIT AS IT WILL BE LOST ON CONTAINER START                           #
 ###############################################################################
+# user tundra;
 worker_processes  auto;
 # Modules
 include /etc/nginx/conf.d/modules.conf;

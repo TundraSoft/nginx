@@ -23,7 +23,7 @@ MODSEC_UPLOAD_DIR=${MODSEC_UPLOAD_DIR:-/tmp/modsecurity/upload}
 # If none mentioned then you wont be able to access the sensitive parts!
 OPT_NGINX_WHITELIST_IP=${NGINX_WHITELIST_IP:-}
 if [ -f /run/secrets/NGINX_WHITELIST_IP ]; then
-  OPT_MAXMIND_KEY=$(cat /run/secrets/NGINX_WHITELIST_IP)
+  OPT_NGINX_WHITELIST_IP=$(cat /run/secrets/NGINX_WHITELIST_IP)
 fi
 
 # Max body size (client upload) Can and should be overriden in server block
