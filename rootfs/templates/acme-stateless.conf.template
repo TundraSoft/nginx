@@ -1,0 +1,11 @@
+###############################################################################
+#                                ACME STATELESS                               #
+###############################################################################
+# THIS SECTION IS GENERATED AT RUNTIME!                                       #
+# DO NOT EDIT AS IT WILL BE LOST ON CONTAINER START                           #
+# GENERATED ONLY IF ACME IS ENABLED ELSE WILL BE BLANK                        #
+###############################################################################
+location ~ ^/\.well-known/acme-challenge/([-_a-zA-Z0-9]+)$ {
+    default_type text/plain;
+    return 200 "$1.${OPT_ACME_THUMBPRINT}";
+}

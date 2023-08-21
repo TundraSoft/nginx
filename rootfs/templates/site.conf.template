@@ -1,10 +1,12 @@
-
-# upstream upstream_${PRIMARY_DOMAIN} {
+#upstream upstream_${PRIMARY_DOMAIN} {
+#  keepalive 128;
+#  least_conn
 #  zone ${PRIMARY_DOMAIN}_upstream 1m;
 #  server serv1:1234 fail_timeout=10s max_fails=3 weight=5;
+#  jdomain api.core port=8008 max_ips=8 interval=10;
 #}
 
-# proxy_cache_path ${NGINX_CACHE_PATH}/$domain levels=1:2 keys_zone=$domain:10m;
+# proxy_cache_path ${NGINX_CACHE_PATH}/$PRIMARY_DOMAIN levels=1:2 keys_zone=$PRIMARY_DOMAIN:10m;
 
 server {
   ##################################################
@@ -12,8 +14,8 @@ server {
   # name, example:
   # server_name google.com www.google.com;
   ##################################################
-  set $primary_domain $PRIMARY_DOMAIN
-  #set $upstream_name upstream_${PRIMARY_DOMAIN}
+  set $primary_domain $PRIMARY_DOMAIN;
+  #set $upstream_name upstream_${PRIMARY_DOMAIN};
   server_name $ALL_DOMAINS;
   listen 80;
   listen [::]:80;
@@ -23,10 +25,12 @@ server {
   #ssl_certificate /etc/nginx/certs/$server_name/certificate.crt;
   #ssl_certificate_key /etc/nginx/certs/$server_name/certificate.key;
 
-  #include /etc/nginx/defaults/ssl-config.conf;
+  #include /etc/nginx/conf.d/ssl-config.conf;
+  include /etc/nginx/conf.d/default-security-headers.conf;
 
-  include /etc/nginx/defaults/security-headers.conf;
-
+  access_log                      /var/log/nginx/$server_name/access-$log_date.log  main;
+  error_log                       /var/log/nginx/$PRIMARY_DOMAIN/error.log;
+  root                            /app/web/$server_name;
   ###################################################
   # www -> no www redirect
   ###################################################
@@ -34,71 +38,49 @@ server {
   #   return 301 https://$primary_domain$request_uri;
   #}
 
-  proxy_set_header Host $host;    
-  proxy_set_header Proxy "";
-  proxy_set_header Upgrade $http_upgrade;
-  proxy_set_header Connection 'upgrade';
-  proxy_set_header X-Real-IP $remote_addr;
-  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-  proxy_set_header X-Forwarded-Port $server_port;
-  proxy_set_header X-Forwarded-Proto $scheme;
-
-  proxy_http_version 1.1;
-  proxy_buffering off;
-  proxy_connect_timeout 60s;
-  proxy_read_timeout 36000s;
-  proxy_redirect off;
-
-  proxy_pass_header Authorization;
-
-  ###################################################
-  # Some funky Locations
-  # These are optional and can be removed
-  ###################################################
-  # server stub status
-  location = /healthz {
-    # allow IP_ADDRESS;
-    # deny all;
-    access_log off;
-    stub_status;
-  }
-
-  # Simple ping pong status
-  location = /ping {
-    access_log off;
-    add_header Content-Type text/plain;
-    return 200 "pong";
-  }
-
-  # Prevent faveicon (assuming not present)
-  location = /favicon.ico {
-    try_files $uri =404;
-    log_not_found off;
-    access_log off;
-  }
+  # Proxy Settings
+  include /etc/nginx/conf.d/default-proxy.conf;
   
   ########################################
   # Extras
   ########################################
-  include /etc/nginx/defaults/accounting.conf;
-  include /etc/nginx/defaults/fancy-index-flat.conf;
-  #include /etc/nginx/defaults/maxmind-city.conf;
-  #include /etc/nginx/defaults/maxmind-country.conf;
-  #include /etc/nginx/defaults/modsecurity.conf;
+  #include /etc/nginx/conf.d/default-modsecurity.conf;
 
   ########################################
   # Serve
   ########################################
-  # Deny all attempts to access hidden files
-  # such as .htaccess, .htpasswd, .DS_Store (Mac).
-  location ~ /\. {
-    deny all;
+  # Error pages
+  error_page 500 502 503 504  /50x.html;
+    location = /50x.html {
+    root /app/defaults/;
   }
 
+  location = /404.html {
+    root /app/defaults/;
+  }
+  
+  # Deny all attempts to access hidden files
+  # such as .htaccess, .htpasswd, .DS_Store (Mac).
+  ## Disable .htaccess and other hidden files
+  location ~ /\.(?!well-known).* {
+      deny all;
+      access_log off;
+      log_not_found off;
+      return 404;
+  }
+
+  # set default locations. Comment them if you do not want to use them
+  include /etc/nginx/conf.d/default-location-healthz.conf;
+  include /etc/nginx/conf.d/default-location-ping.conf;
+  include /etc/nginx/conf.d/fancy-index-flat.conf;
+  include /etc/nginx/conf.d/default-location-faveico.conf;
+  
+  # Add Any other routes here
+  
   location / {
-    root /app/$server_name;
+    root /app/web/$server_name;
     index index.html index.htm;
     try_files \$uri \$uri/ =404;
-    #proxy_pass upstream_${PRIMARY_DOMAIN};
+    #proxy_pass http://$upstream_name/;
   }
 }

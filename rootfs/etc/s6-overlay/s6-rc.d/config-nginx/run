@@ -1,32 +1,9 @@
 #!/command/with-contenv sh
-###############################################################################
-# Build maxmind template
-###############################################################################
-if [ ! -z ${MAXMIND_KEY} ]
-then
-  for template in 'maxmind-city.conf.template' 'maxmind-country.conf.template'
-  do
-    echo "[info] Enabling ${template}"
-    envsubst < /templates/${template} > /etc/nginx/defaults/${template//.template}
+if [ -f /var/log/nginx/nginx-ctl.lock ]; then
+  # Waut for configuration to finish
+  while [ -f /var/log/nginx/nginx-ctl.lock ]; do
+    sleep 5
   done
+else
+  nginx-ctl configure
 fi
-
-###############################################################################
-# ACME
-###############################################################################
-ACCOUNT_THUMBPRINT=
-SERVER=${ACME_SERVER:-'letsencrypt'}
-if [ ! -z ${ACME_EMAIL} ]
-then
-  echo "[info] Configuring acme with email ${ACME_EMAIL} and server ${SERVER}"
-  output=$(/acme/acme.sh --home /acme/ --register-account --server ${SERVER} -m ${ACME_EMAIL})
-
-  # Extract the value of ACCOUNT_THUMBPRINT from the output using grep and awk
-  ACCOUNT_THUMBPRINT=$(echo "$output" | grep "ACCOUNT_THUMBPRINT" | awk -F "'" '{print $2}')
-  echo "[info] Registered! Account thumbprint is ${ACCOUNT_THUMBPRINT}"
-fi
-
-export "ACME_THUMBPRINT=${ACCOUNT_THUMBPRINT}"
-
-echo "[info] Setting default site config"
-envsubst < /templates/default.conf.template > /etc/nginx/sites.d/0-default.conf

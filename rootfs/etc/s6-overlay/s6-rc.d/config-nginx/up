@@ -1,2 +1,3 @@
 #!/bin/execlineb -P
-exec s6-setuidgid tundra /etc/s6-overlay/s6-rc.d/config-nginx/run
+# exec s6-setuidgid tundra /etc/s6-overlay/s6-rc.d/config-nginx/run
+exec /etc/s6-overlay/s6-rc.d/config-nginx/run
