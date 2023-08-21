@@ -1,0 +1,104 @@
+#!/bin/sh
+DOCKER_PATH=/var/bin/docker/sock
+SERVICE_NAME=""
+UPSTREAM_PORT=""
+UPSTREAM_WEIGHT=""
+UPSTREAM_MAX_FAILS=3
+UPSTREAM_FAIL_TIMEOUT=30
+UPSTREAM_BACKUP=""
+UPSTREAM_NAME=""
+DRY_RUN="false"
+
+# Parse command-line arguments
+for arg in "$@"
+do
+  case $arg in
+    --service-name=*)
+    SERVICE_NAME="${arg#*=}"
+    ;;
+    --service-port=*)
+    UPSTREAM_PORT="${arg#*=}"
+    ;;
+    --weight=*)
+    UPSTREAM_WEIGHT="${arg#*=}"
+    if ! [[ "$UPSTREAM_WEIGHT" =~ ^[1-9]+$ ]] || [ "$UPSTREAM_WEIGHT" -lt 0 ] || [ "$UPSTREAM_WEIGHT" -gt 10 ]; then
+        echo "Error: --weight must be a number between 1 and 10"
+        display_help
+        exit 1
+    fi
+    ;;
+    --max-fails=*)
+    UPSTREAM_MAX_FAILS="${arg#*=}"
+    # Must be a number
+    if ! [[ "$UPSTREAM_MAX_FAILS" =~ ^[1-9]+$ ]] || [ "$UPSTREAM_MAX_FAILS" -lt 0 ]; then
+        echo "Error: --max-fails must be a number greater than equal to 0"
+        display_help
+        exit 1
+    fi
+    ;;
+    --fail-timeout=*)
+    UPSTREAM_FAIL_TIMEOUT="${arg#*=}"
+    # Must be a number greater than equal to 0
+    if ! [[ "$UPSTREAM_FAIL_TIMEOUT" =~ ^[1-9]+$ ]] || [ "$UPSTREAM_FAIL_TIMEOUT" -lt 0 ]; then
+        echo "Error: --fail-timeout must be a number greater than equal to 0"
+        display_help
+        exit 1
+    fi
+    ;;
+    --backup)
+    UPSTREAM_BACKUP=" backup"
+    ;;
+    --upstream-name=*)
+    UPSTREAM_NAME="${arg#*=}"
+    ;;
+    --dryrun)
+    dryrun="true"
+    ;;
+    *)
+    echo "Unknown argument: $arg"
+    display_help
+    ;;
+  esac
+done
+
+IPList=$(curl --silent --unix-socket /run/docker.sock http://localhost/v1.43/services/${SERVICE_NAME} | jq ."Endpoint"."VirtualIPs" | jq .[]."Addr")
+# check if error occured
+if [ $? -ne 0 ]; then
+  echo "Error occured while fetching IP addresses for service ${SERVICE_NAME}"
+  exit 1
+fi
+
+if [ -z "$IPList" ]; then
+  echo "No IP addresses found for service ${SERVICE_NAME}"
+  exit 1
+fi
+
+# Delete existing file in upstream directory
+rm -f /etc/nginx/upsteam.d/${UPSTREAM_NAME}.conf
+# Set the zone name
+echo "zone ${UPSTREAM_NAME} 64k;" >> /etc/nginx/upsteam.d/${UPSTREAM_NAME}.conf
+$UPSTREAM_ARGS = "weight=${UPSTREAM_WEIGHT} max_fails=${UPSTREAM_MAX_FAILS} fail_timeout=${UPSTREAM_FAIL_TIMEOUT}${UPSTREAM_BACKUP}";
+# Loop through IPList and print each IP address
+for ip in ${IPList}
+do
+  # Call update process for the upstream
+  # Write to file
+  echo "server ${ip}:${UPSTREAM_PORT} ${UPSTREAM_ARGS};" >> /etc/nginx/upsteam.d/${UPSTREAM_NAME}.conf
+done
+
+# If flag --init is not set, then we call update
+if [ "$dryrun" = "false" ]; then
+  # Call update process for the upstream
+  
+fi
+
+
+extract_info() {
+    output=$(curl "http://127.0.0.1:6000/dynamic?upstream=zone_for_backends&verbose=")
+    echo "$output" | while read -r line ; do
+        weight=$(echo $line | awk -F' ' '{print $3}' | awk -F'=' '{print $2}')
+        max_fails=$(echo $line | awk -F' ' '{print $4}' | awk -F'=' '{print $2}')
+        fail_timeout=$(echo $line | awk -F' ' '{print $5}' | awk -F'=' '{print $2}')
+        echo "Weight: $weight, Max Fails: $max_fails, Fail Timeout: $fail_timeout"
+    done
+}

@@ -1,0 +1,243 @@
+#!/bin/sh
+
+# Constants
+ACME_HOME="/acme/"
+DEBUG_MODE=0
+LOCKFILE="/var/logs/nginx/acme-ctl.lock"
+
+# Variables used
+OPT_SERVER="letsencrypt"
+OPT_EMAIL=""
+OPT_DOMAIN=""
+OPT_ALT_DOMAINS=""
+OPT_OUTPUT="/etc/nginx/certs"
+
+# Function to display error message
+print_message() {
+  local message_type=$1
+  local message=$2
+  local color_code
+  local dt=$(date --utc +%FT%TZ)
+  local host=$(hostname)
+  case $message_type in
+  ERROR) color_code='\033[0;31m' ;;
+  WARN) color_code='\033[0;33m' ;;
+  DEBUG) color_code='\033[1;32m' ;;
+  INFO) color_code='\033[0;36m' ;;
+  esac
+
+  printf "[${dt}@${host}]${color_code}[${message_type}]: ${message}\033[0m\n"
+}
+
+ERROR() {
+  print_message "ERROR" "$1"
+  cleanup
+  exit 1
+}
+
+WARN() {
+  print_message "WARN" "$1"
+}
+
+DEBUG() {
+  [ "$DEBUG_MODE" = 1 ] && print_message "DEBUG" "$1"
+}
+
+INFO() {
+  print_message "INFO" "$1"
+}
+
+init() {
+  if [ -f ${LOCKFILE} ]; then
+    INFO "There is already an instance of this script running. Exiting..."
+    exit 1
+  fi
+  touch ${LOCKFILE}
+}
+
+cleanup() {
+  if [ -f ${LOCKFILE} ]; then
+    rm -f ${LOCKFILE}
+  fi
+}
+
+usage() {
+  echo "Usage: ${0} COMMAND [OPTIONS]"
+  echo
+  echo "Helper script to manage acme ssl certificates for nginx"
+  echo
+  echo
+  echo "Commands:"
+  echo "  register                        Register account with ACME server"
+  echo "    Options:"
+  echo "      -e, --email <EMAIL>         Email id to be used for registration"
+  echo
+  echo "  issue                           Issue certificate"
+  echo "    Options:"
+  echo "      -d, --domain <TLD>          The Primary domain for which action is being performed"
+  echo "          --alt-domains <TLDs>    Secondary/Alternate domains seperated by comma"
+  echo "          --output <PATH>         Output directory where certificates will be stored default is /etc/nginx/certs"
+  echo
+  echo "  renew                           Renew certificate. If domain is not specified, then all certificates will be renewed"
+  echo "    Options:"
+  echo "      -d, --domain <TLD>          The Primary domain for which action is being performed"
+  echo "      -o, --output <PATH>         Output directory where certificates will be stored default is /etc/nginx/certs"
+  echo
+  echo "Options:"
+  echo "  -h, --help                      Show this help message and exit"
+  echo "  -s, --server                    The server with which to register, default is letsencrypt"
+  echo "      --debug                     Enable debug messages to be displayed"
+  echo
+}
+
+callAcme() {
+  /acme/acme.sh --home ${ACME_HOME} --config-home ${ACME_HOME} "$@"
+  return $?
+}
+
+saveCertificate() {
+  DOMAIN=${OPT_DOMAIN}
+  if [ -z ${DOMAIN} ]
+  then
+    for file in ${ACME_HOME}/*_ecc/fullchain.cer; do
+      if [ -f "$file" ]; then
+        local domain=$(basename $file | cut -d'_' -f1)
+        cp -f ${ACME_HOME}/${domain}_ecc/fullchain.cer ${OPT_OUTPUT}/${domain}.crt
+        cp -f ${ACME_HOME}/${domain}_ecc/${domain}.key ${OPT_OUTPUT}/${domain}.key
+      fi
+    done
+  else
+    cp -f ${ACME_HOME}/${DOMAIN}_ecc/fullchain.cer ${OPT_OUTPUT}/${DOMAIN}.crt
+    cp -f ${ACME_HOME}/${DOMAIN}_ecc/${DOMAIN}.key ${OPT_OUTPUT}/${DOMAIN}.key
+  fi
+}
+
+command_register() {
+  local EMAIL=${OPT_EMAIL}
+  local SERVER=${OPT_SERVER}
+  if [ ! -z ${EMAIL} ]
+  then
+    DEBUG "Registering ACME Account with email ${EMAIL} and server ${SERVER}"
+    if ! callAcme --register-account --server ${SERVER} -m ${EMAIL}; then
+      ERROR "Registration failed for email ${EMAIL} in ${SERVER}!"
+    fi
+    DEBUG "Registered ACME Account with email ${EMAIL} and server ${SERVER}"
+  else
+    ERROR "Email id is required for registration"
+  fi
+}
+
+command_issue() {
+  local DOMAIN=${OPT_DOMAIN}
+  local SECONDARY=${OPT_ALT_DOMAINS//, /,}
+  local ALL_DOMAINS=${DOMAIN}${SECONDARY:+,${SECONDARY}}
+  local SERVER=${OPT_SERVER}
+  if [ ! -z ${ALL_DOMAINS} ]
+  then
+    DEBUG "Issuing certificate for domain ${ALL_DOMAINS} using ${SERVER}"
+    if ! callAcme --stateless --issue --server ${SERVER} -d ${ALL_DOMAINS//,/ -d }; then
+      ERROR "Certificate issuance failed for domain ${ALL_DOMAINS} in ${SERVER}!"
+    fi
+    saveCertificate
+  else
+    ERROR "Atleast one domain must be specified for certificate issuance"
+  fi
+}
+
+command_renew() {
+  local DOMAIN=${OPT_DOMAIN}
+  if [ -z ${DOMAIN} ]
+  then
+    DEBUG "Renewing all certificates"
+    callAcme --stateless --renew-all
+  else
+    DEBUG "Renewing certificate for domain ${DOMAIN}"
+    callAcme --stateless --renew --domain ${DOMAIN}
+  fi
+  if [ $? -ne 0 ]; then
+    ERROR "Certificate renewal failed!"
+  fi
+  saveCertificate
+}
+
+###############################################################################
+#                                 Main Section                                #
+###############################################################################
+if [ $# -eq 0 ]; then
+  usage
+  exit 1;
+fi
+
+COMMAND="${1:-}"
+if [ -z "$COMMAND" ]; then
+  ERROR "No command was specified. Run with --help to see the usage. Maybe you want to run \`$ARG0 issue\`?"
+fi
+
+if ! command -v "command_${COMMAND}" > /dev/null 2>&1; then
+  ERROR "Unknown command: ${COMMAND}. Run with --help to see the usage."
+fi
+shift
+
+if ! args="$(getopt -o hs:e:d:o: --long help,server:,email:,domain:,output:,alt-domains:,debug -n "$ARG0" -- "$@")"; then
+  usage
+  exit 1
+fi
+
+set -- $args
+while [ "$#" -gt 0 ]; do
+  arg="$1"
+  shift
+  case "$arg" in
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    -s | --server)
+      OPT_SERVER=$1
+      shift
+      ;;
+    -e | --email)
+      OPT_EMAIL=${1//\'/}
+      shift
+      ;;
+    -d | --domain)
+      OPT_DOMAIN=${1//\'/}
+      shift
+      ;;
+    --alt-domains)
+      OPT_ALT_DOMAINS=${1//\'/}
+      shift
+      ;;
+    -o | --output)
+      OPT_OUTPUT=${1//\'/}
+      shift
+      ;;
+    --debug)
+      DEBUG_MODE=1
+      ;;
+    --)
+      break
+      ;;
+    *)
+      ERROR "Unknown argument '$arg' when parsing script arguments."
+      exit 1
+      ;;
+  esac
+done
+
+if [ ${OPT_SERVER} != "letsencrypt" ] && [ ${OPT_SERVER} != "zerossl" ]; then
+  ERROR "Invalid server ${OPT_SERVER} specified. Valid values are letsencrypt and zerossl"
+fi
+
+if [ ${COMMAND} == 'issue' ] || [ ${COMMAND} == 'renew' ]; then
+  if [ -z ${OPT_OUTPUT} ]; then
+    ERROR "Output directory is required for issue and renew commands"
+  fi
+  if [ ! -d ${OPT_OUTPUT} ]; then
+    mkdir -p ${OPT_OUTPUT}
+  fi
+fi
+
+init
+"command_${COMMAND}"
+cleanup

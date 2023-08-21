@@ -1,0 +1,2 @@
+#!/bin/sh
+/acme/acme.sh --config-home '/acme/config "$@"

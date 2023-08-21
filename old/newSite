@@ -1,0 +1,328 @@
+#!/bin/sh
+NGINX_CONF_PATH=${NGINX_CONF_PATH:-'/etc/nginx/sites.d'}
+NGINX_CERT_PATH=${NGINX_CERT_PATH:-'/etc/nginx/certs'}
+NGINX_WEBROOT=${NGINX_WEBROOT:-'/app'}
+NGINX_CACHE_PATH=${NGINX_CACHE_PATH:-'/var/cache/nginx'}
+
+SITE_TEMPLATE="/templates/site.conf.template"
+
+# Variables
+DOMAIN=""
+ALT_DOMAINS=""
+ALL_DOMAINS=""
+SSL_MODE="auto"
+MODSECURITY="false"
+GEOIP=""
+UPSTREAM_SERVICE=""
+UPSTREAM_LABEL=""
+UPSTREAM_PORT=""
+UPSTREAM_WEIGHT="5"
+UPSTREAM_MAX_FAILS="3"
+UPSTREAM_FAIL_TIMEOUT="10"
+UPSTREAM_BACKUP=""
+UPSTREAM_NAME=""
+DEBUG_MODE="false"
+DRY_RUN="false"
+
+SSL_EXISTS="false"
+CONF_EXISTS="false"
+WEBROOT_EXISTS="false"
+
+# Function to display help message
+display_help() {
+  echo "Usage: $0 --domain=<domain> --ssl-mode=<mode> [--dryrun]"
+  echo ""
+  echo " Basic site configuration"
+  echo ""
+  echo "  --domain                  : Top Level Domain, e.g. abc.com"
+  echo "  --alt-domains             : Alternate domain names (comma separated)"
+  echo "  --ssl-mode                : SSL Mode, must be one of 'ACME', 'SELF', 'AUTO', 'NONE', default is auto"
+  echo "  --with-modsecurity        : Enable ModSecurity, default is false"
+  echo "  --with-geoip              : Enable GeoIP, default is no. Value can be country or city. if blank, then country is used."
+  echo ""
+  echo " Upstream configuration." 
+  echo " If Upstream has to be defined, then one of --upstream-service, --upstream-label or --upstream-ip AND --upstream-port MUST be defined."
+  echo ""
+  echo "  --upstream-service        : Name of the docker service (optional)."
+  echo "  --upstream-label          : Label of the docker container (optional)."
+  echo "  --upstream-ip             : List of IP for upstream service (comma seperated)."
+  echo "  --upstream-port           : Port of the upstream service. Required IF either upstream-service or upstream-label is defined."
+  echo "  --upstream-weight         : Weight of the upstream service. Default is 5."
+  echo "  --upstream-max-fails      : Max Fails of the upstream service. Default is 3."
+  echo "  --upstream-fail-timeout   : Fail Timeout of the upstream service. Default is 10."
+  echo "  --upstream-backup         : Set upstream as backup. Default is false."
+  echo "  --upstream-name           : Name of the upstream. Default is the upstream_${DOMAIN}."
+  echo ""
+  echo " Other options"
+  echo "  --debug                   : Optional flag, if passed then set to true else false"
+  echo "  --dryrun                  : Perform a dry run. Changes will not be implemented"
+  exit 1
+}
+
+# Function to display error message
+error() {
+  echo "Error: $1"
+  exit 1
+}
+
+# Function to display debug message
+debug() {
+  if [ "$DEBUG_MODE" = "true" ]; then
+    echo "Debug: $1"
+  fi
+}
+
+# Function to display debug message
+info() {
+  echo $1;
+}
+
+# Process input
+process() {
+  # Check if mandatory arguments were provided
+  debug "Processing arguments"
+  if [ -z "$DOMAIN" ] || [ -z "$SSL_MODE" ]; then
+    echo "Both --domain and --ssl-mode arguments are mandatory."
+    display_help
+  fi
+  debug "Consolidating domains"
+  # Add the primary domain to the list
+  ALL_DOMAINS="$DOMAIN"
+  # Add the alternate domains to the list
+  if [ ! -z "$ALT_DOMAINS" ]; then
+    # Replace commas with spaces
+    ALT_DOMAINS=$(echo "$ALT_DOMAINS" | tr ',' ' ')
+    for ALT_DOMAIN in $ALT_DOMAINS; do
+      ALL_DOMAINS="$ALL_DOMAINS $ALT_DOMAIN"
+    done
+  fi
+  if [ ! -z "$GEOIP" ];
+  then
+    if [ -z "${MAXMIND_KEY}"];
+    then
+      error "MAXMIND_KEY is not set. Hence cannot enable GeoIP."
+    fi
+    if [ "$GEOIP" != "country" ] && [ "$GEOIP" != "city" ];
+    then
+      error "GEOIP must be either country or city"
+    fi
+  fi
+  debug "Validating Upstream"
+  # Upstream check
+  # @TODO Finish this
+
+  # End Upstream Check
+  debug "Checking if configs already exists"
+  # if [ -f "${NGINX_CONF_PATH}/${DOMAIN}.conf" ] || [ -f "${NGINX_CERT_PATH}/${DOMAIN}.crt" ] || [ -f "${NGINX_CERT_PATH}/${DOMAIN}.key" ] || [ -d "${NGINX_WEBROOT}/${DOMAIN}" ]; then
+  #   echo "Config for ${DOMAIN} already exists. Please delete the existing config and try again."
+  #   exit 1
+  # fi
+  # Fatal
+  if [ -f "${NGINX_CONF_PATH}/${DOMAIN}.conf" ]; then
+    debug "Nginx config for ${DOMAIN} found!"
+    CONF_EXISTS="true"
+  fi
+  if [ -f "${NGINX_CERT_PATH}/${DOMAIN}.crt" ] || [ -f "${NGINX_CERT_PATH}/${DOMAIN}.key" ] ; then
+    debug "SSL Cert/Key for ${DOMAIN} found!"
+    SSL_EXISTS="true"
+  fi
+  if [ -d "${NGINX_WEBROOT}/${DOMAIN}" ]; then
+    debug "Webroot for ${DOMAIN} found!"
+    WEBROOT_EXISTS="true"
+  fi
+
+  info "###############################################################################"
+  info "                                   Variables                                   "
+  info "###############################################################################"
+  info "DOMAIN                   : $DOMAIN"
+  info "ALL_DOMAINS              : $ALL_DOMAINS"
+  info "SSL_MODE                 : $SSL_MODE"
+  info "MODSECURITY              : $MODSECURITY"
+  info "GEOIP                    : $GEOIP"
+  info "UPSTREAM_SERVICE         : $UPSTREAM_SERVICE"
+  info "UPSTREAM_LABEL           : $UPSTREAM_LABEL"
+  info "UPSTREAM_PORT            : $UPSTREAM_PORT"
+  info "UPSTREAM_WEIGHT          : $UPSTREAM_WEIGHT"
+  info "UPSTREAM_MAX_FAILS       : $UPSTREAM_MAX_FAILS"
+  info "UPSTREAM_FAIL_TIMEOUT    : $UPSTREAM_FAIL_TIMEOUT"
+  info "UPSTREAM_BACKUP          : $UPSTREAM_BACKUP"
+  info "UPSTREAM_NAME            : $UPSTREAM_NAME"
+  info "###############################################################################"
+  info "                                 Configuration                                 "
+  info "###############################################################################"
+  info "SSL_EXISTS               : $SSL_EXISTS"
+  info "CONF_EXISTS              : $CONF_EXISTS"
+  info "WEBROOT_EXISTS           : $WEBROOT_EXISTS"
+}
+
+generate_ssl() {
+  local MODE="$1"
+  rm -rf /tmp/$DOMAIN.crt /tmp/$DOMAIN.key
+  debug $1
+  debug $MODE
+  case $MODE in
+    "acme")
+      debug "Generating SSL certificate using ACME for ${DOMAIN}"
+      # local COMMAND="--issue --stateless -d ${ALL_DOMAINS// /-d }"
+      # debug "command: ${COMMAND}"
+      acme --issue --stateless -d ${DOMAIN}
+      ;;
+    "self")
+      debug "Generating self signed certificate from ${DOMAIN}"
+      local SUBJ_ALT_NAMES=""
+      if [ ! -z "$ALT_DOMAINS" ]; then
+        openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+          -addext "subjectAltName=DNS:${ALT_DOMAINS// /,DNS:}" \
+          -keyout "/tmp/$DOMAIN.key" \
+          -out "/tmp/$DOMAIN.crt" \
+          -subj "/C=US/ST=Denial/L=Springfield/O=Dis/CN=$DOMAIN"
+      else
+        openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+          -keyout "/tmp/$DOMAIN.key" \
+          -out "/tmp/$DOMAIN.crt" \
+          -subj "/C=US/ST=Denial/L=Springfield/O=Dis/CN=$DOMAIN"
+      fi
+      ;;
+    *)
+      echo "Invalid SSL mode: $MODE"
+      exit 1
+      ;;
+  esac
+}
+
+# Lets configure
+configure() {
+  debug "Configuring site $DOMAIN"
+  # debug "Creating directories"
+  # # First create the folders
+  # mkdir -p ${NGINX_WEBROOT}/${DOMAIN}
+  # mkdir -p ${NGINX_CERT_PATH}/${DOMAIN}
+  # mkdir -p /var/log/nginx/${DOMAIN}
+
+  # debug "Finished creating directories"
+  debug "Generating SSL"
+  if [ "$SSL_MODE" != "none" ] || [ "$SSL_EXISTS" != "true" ];
+  then
+    if [ "$SSL_MODE" = 'auto' ];
+      then
+        if [ ! -z "$ACME_EMAIL" ];
+        then
+          SSL_MODE='acme'
+        else
+          SSL_MODE='self'
+        fi
+      fi
+      debug "Generating SSL using $SSL_MODE for $DOMAIN"
+      generate_ssl ${SSL_MODE}
+    # Copy the SSL files
+    # cp /tmp/$DOMAIN.crt ${NGINX_CERT_PATH}/${DOMAIN}/$DOMAIN.crt
+    # cp /tmp/$DOMAIN.key ${NGINX_CERT_PATH}/${DOMAIN}/$DOMAIN.key
+  fi
+
+  debug "Creating site config"
+  local PRIMARY_DOMAIN=${DOMAIN}
+  export $PRIMARY_DOMAIN $ALL_DOMAINS $NGINX_CACHE_PATH
+  envsubst '$PRIMARY_DOMAIN $ALL_DOMAINS $NGINX_CACHE_PATH' < ${SITE_TEMPLATE} > "/tmp/${DOMAIN}.conf"
+  if [ "$SSL_MODE" != "none" ];
+  then
+    debug "Updating config to enable ssl"
+    sed -i 's|#listen 443 ssl;|listen 443 ssl;|' /tmp/$DOMAIN.conf
+    sed -i 's|#listen \[::\]:443 ssl;|listen [::]:443 ssl;|' /tmp/$DOMAIN.conf
+    sed -i 's|#ssl_certificate /etc/nginx/certs/$server_name/certificate.crt;|ssl_certificate /etc/nginx/certs/$server_name/certificate.crt;|' /tmp/$DOMAIN.conf
+    sed -i 's|#ssl_certificate_key /etc/nginx/certs/$server_name/certificate.key;|ssl_certificate_key /etc/nginx/certs/$server_name/certificate.key;|' /tmp/$DOMAIN.conf
+    sed -i 's|#include /etc/nginx/defaults/ssl-config.conf;|include /etc/nginx/defaults/ssl-config.conf;|' /tmp/$DOMAIN.conf
+  fi
+
+  debug "Finished creating site config"
+  if [ "$MODSECURITY" = "true" ]; then
+    debug "Updating config to enable modsecurity"
+    sed -i 's|#include /etc/nginx/defaults/modsecurity.conf;|include /etc/nginx/defaults/modsecurity.conf;|' /tmp/$DOMAIN.conf
+  fi
+  if [ "$GEOIP" != "" ]; then
+    debug "Enabling Maxmind-${GEOIP} for ${DOMAIN}"
+    # Create the geoip config
+    sed -i "s|#include /etc/nginx/defaults/maxmind-${GEOIP}.conf;|include /etc/nginx/defaults/maxmind-${GEOIP}.conf;|" /tmp/$DOMAIN.conf
+  fi
+  
+  # Upstream
+  if [ ! -z "$UPSTREAM_SERVICE" ] || [ ! -z "$UPSTREAM_LABEL" ]; then
+    debug "Creating upstream config"
+    # Create the upstream config
+
+    debug "Finished creating upstream config"
+    debug "Enabling upstream config"
+
+    debug "Finished enabling upstream config"
+  fi
+}
+
+test_nginx() {
+  nginx -t
+  if [ $? -eq 0 ]; then
+    echo "NGINX configuration test is successful."
+  else
+    echo "Error in NGINX configuration. Disabling the site configuration."
+    if [ "$dryrun" = "false" ]
+    then
+      mv "$config_file_path" "$NGINX_CONF_PATH/$domain.conf.disabled"
+    fi
+  fi
+}
+
+###############################################################################
+#                                 Main Section                                #
+###############################################################################
+
+# If no arguments are provided, display help
+if [ $# -eq 0 ]; then
+  display_help
+fi
+
+# Process input
+# Parse command-line arguments
+for arg in "$@"
+do
+  case $arg in
+    --domain=*)
+    DOMAIN=$(echo "${arg#*=}" | tr '[:upper:]' '[:lower:]')
+    ;;
+    --alt-domains=*)
+    ALT_DOMAINS=$(echo "${arg#*=}" | tr '[:upper:]' '[:lower:]')
+    ;;
+    --ssl-mode=*)
+    SSL_MODE=$(echo "${arg#*=}" | tr '[:upper:]' '[:lower:]')
+    case $SSL_MODE in
+      acme|self|none|auto)
+        # valid value, do nothing
+        ;;
+      *)
+        debug "Verifying if input argument --ssl-mode is valid."
+        echo "sslmode must be one of 'ACME', 'SELF', 'AUTO' or 'NONE'."
+        display_help
+        ;;
+    esac
+    ;;
+    --with-modsecurity)
+    MODSECURITY="true"
+    ;;
+    --with-geoip=*)
+    GEOIP=$(echo "${arg#*=}" | tr '[:upper:]' '[:lower:]')
+    ;;
+    --with-geoip)
+    GEOIP="country"
+    ;;
+    --debug)
+    DEBUG_MODE="true"
+    ;;
+    --dryrun)
+    DRY_RUN="true"
+    ;;
+    *)
+    echo "Unknown argument: $arg"
+    display_help
+    ;;
+  esac
+done
+
+process
+configure
