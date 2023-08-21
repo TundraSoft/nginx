@@ -63,11 +63,13 @@ config_save() {
 }
 
 init() {
-  if [ -f ${LOCKFILE} ]; then
-    INFO "There is already an instance of this script running. Exiting..."
-    exit 1
+  if [ "${COMMAND}" != 'reload' ]; then
+    if [ -f ${LOCKFILE} ]; then
+      INFO "There is already an instance of this script running. Exiting..."
+      exit 1
+    fi
+    touch ${LOCKFILE}
   fi
-  touch ${LOCKFILE}
 }
 
 cleanup() {
@@ -415,7 +417,7 @@ command_add_site() {
   
   if [ "$OPT_WITH_MODSECURITY" == 1 ]; then
     DEBUG "Updating config to enable modsecurity"
-    sed -i 's|#include /etc/nginx/conf.d/modsecurity.conf;|include /etc/nginx/conf.d/modsecurity.conf;|' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
+    sed -i 's|#include /etc/nginx/conf.d/default-modsecurity.conf;|include /etc/nginx/conf.d/default-modsecurity.conf;|' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
   fi
 
   INFO "Ensuring right permissions are present"
@@ -544,7 +546,7 @@ configure_modsecurity() {
   fi
 
   # Inbound and Outbound Anomaly Score
-  sed -z -E -i 's/#SecAction[^"]+"id:900110.*tx\.outbound_anomaly_score_threshold=4\"/SecAction \\\n  \"id:900110, \\\n   phase:1, \\\n   nolog, \\\n   pass, \\\n   t:none, \\\n   setvar:tx.inbound_anomaly_score_threshold='"${OPT_MODSEC_CRS_ANOMALY_INBOUND}"',  \\\n   setvar:tx.outbound_anomaly_score_threshold='"${OPT_CMODSEC_RS_ANOMALY_OUTBOUND}"'\"/' "${setup_conf_path}"
+  sed -z -E -i 's/#SecAction[^"]+"id:900110.*tx\.outbound_anomaly_score_threshold=4\"/SecAction \\\n  \"id:900110, \\\n   phase:1, \\\n   nolog, \\\n   pass, \\\n   t:none, \\\n   setvar:tx.inbound_anomaly_score_threshold='"${OPT_MODSEC_CRS_ANOMALY_INBOUND}"',  \\\n   setvar:tx.outbound_anomaly_score_threshold='"${OPT_MODSEC_CRS_ANOMALY_OUTBOUND}"'\"/' "${setup_conf_path}"
 
   # HTTP methods that a client is allowed to use.
   if [ -n "${OPT_MODSEC_CRS_ALLOWED_METHODS}" ]; then
