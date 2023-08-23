@@ -159,7 +159,6 @@ ENV ACME_EMAIL=\
     MAXMIND_DATABASE="city" \
     MAXMIND_EDITION="GeoLite2" \
     MAXMIND_KEY=\
-    MAXMIND_PATH="/etc/nginx/maxmind"\
     MAXMIND_REFRESH='0 0 * * *' \
     MODSEC_AUDIT_ENGINE="RelevantOnly" \
     MODSEC_AUDIT_LOG_FORMAT=JSON \
@@ -261,7 +260,8 @@ COPY --from=coreruleset /opt/owasp-crs /etc/nginx/conf.d/modsecurity/owasp
 RUN mv /etc/nginx/conf.d/modsecurity/owasp/crs-setup.conf /templates/crs-setup.conf.template; \
     ln -s /usr/local/modsecurity/lib/libmodsecurity.so.${MOD_SECURITY_VERSION} /usr/local/modsecurity/lib/libmodsecurity.so.3.0; \
     ln -s /usr/local/modsecurity/lib/libmodsecurity.so.${MOD_SECURITY_VERSION} /usr/local/modsecurity/lib/libmodsecurity.so.3; \
-    ln -s /usr/local/modsecurity/lib/libmodsecurity.so.${MOD_SECURITY_VERSION} /usr/local/modsecurity/lib/libmodsecurity.so;
+    ln -s /usr/local/modsecurity/lib/libmodsecurity.so.${MOD_SECURITY_VERSION} /usr/local/modsecurity/lib/libmodsecurity.so; \
+    setgroup ${NGINX_PREFIX} ${NGINX_CONF_PATH} /var/log/nginx;
 
 # /etc/nginx is Config /app is the webroot /var/log/nginx is the log path
 VOLUME [ "/etc/nginx", "/app", "/var/log/nginx" ]

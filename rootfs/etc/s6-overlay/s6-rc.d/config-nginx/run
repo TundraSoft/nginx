@@ -1,9 +1,12 @@
 #!/command/with-contenv sh
 if [ -f /var/log/nginx/nginx-ctl.lock ]; then
+  echo "There is already a process running. Waiting for that to complete"
   # Waut for configuration to finish
   while [ -f /var/log/nginx/nginx-ctl.lock ]; do
-    sleep 5
+    sleep 10
   done
+  echo "The task is complete. We run permission check for safety"
+  nginx-ctl initialize
 else
   nginx-ctl configure
 fi
