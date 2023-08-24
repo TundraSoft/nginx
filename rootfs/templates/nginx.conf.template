@@ -39,7 +39,6 @@ http {
 
   include /etc/nginx/conf.d/default-gzip.conf;
 
-  #include /etc/nginx/defaults/accounting.conf;
   #include /etc/nginx/conf.d/maxmind.conf;
   vhost_traffic_status_zone;
   #vhost_traffic_status_dump /var/log/nginx/$hostname.db 60s;

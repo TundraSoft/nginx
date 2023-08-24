@@ -53,11 +53,11 @@ server {
   # Error pages
   error_page 500 502 503 504  /50x.html;
     location = /50x.html {
-    root /app/defaults/;
+    root /app/default/;
   }
 
   location = /404.html {
-    root /app/defaults/;
+    root /app/default/;
   }
   
   # Deny all attempts to access hidden files
