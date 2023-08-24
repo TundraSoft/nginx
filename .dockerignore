@@ -3,5 +3,7 @@
 **/.gitkeep
 **/.github
 **/.gitattributes
+**/.gitignore
+**/.gitkeep
 **/*.md
 LICENSE
