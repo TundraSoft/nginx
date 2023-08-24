@@ -1,6 +1,6 @@
 #upstream upstream_${PRIMARY_DOMAIN} {
-#  keepalive 128;
 #  least_conn;
+#  keepalive 128;
 #  zone ${PRIMARY_DOMAIN}_upstream 1m;
 #  server serv1:1234 fail_timeout=10s max_fails=3 weight=5;
 #  jdomain api.core port=8008 max_ips=8 interval=10;

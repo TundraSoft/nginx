@@ -169,6 +169,16 @@ usage() {
   echo "          --edition <EDITION>     The MaxMind edition to download, defaults to geoip2lite"
   echo "          --database <DATABASE>   The MaxMind database to download, defaults to city"
   echo
+  echo "-------------------------------------------------------------------------------"
+  echo "-                                Log Management                               -"
+  echo "-------------------------------------------------------------------------------"
+  echo
+  echo "  consolidate-logs                Consolidate log files"
+  echo 
+  echo "  purge-logs                      Purge log files"
+  # echo "    Options:"
+  # echo "      -d, --days <DAYS>           The number of days to keep logs for, defaults to 30"
+  echo
   echo "Options:"
   echo "  -h, --help                      Show this help message and exit"
   echo "  -c, --config <FILE>             The configuration file to use"
@@ -877,6 +887,53 @@ command_maxmind_fetch() {
   rm -rf /tmp/maxmind
 }
 
+# NGINX Log Management
+command_consolidate_logs() {
+  local path=${NGINX_LOG_PATH}
+  local dt=$(date -d @$(( $(date +"%s") - 86400)) +"%Y-%m-%d")
+  local file="access-${dt}.log"
+  # Consolidate root level logs
+  INFO "Consolidating root level logs"
+  if [ -f ${path}/access.log ]; then
+    mv -f ${path}/access.log ${path}/access-${dt}.log
+  fi
+  if [ -f ${path}/error.log ]; then
+    mv -f ${path}/error.log ${path}/error-${dt}.log
+  fi
+  if [ -f ${path}/modsec_audit.log ]; then
+    mv -f ${path}/modsec_audit.log ${path}/modsec_audit-${dt}.log
+  fi
+  DEBUG "Consolidating logs in folders (website etc)"
+  for dir in $(find /var/log/nginx -type d); do
+    DEBUG "Checking if access log files are present in ${dir}"
+    if ls ${dir}/access-${dt}@*.log > dev/null 2>&1; then
+      INFO "Consolidating ${dir} logs for date ${dt}"
+      paste -d "\n" ${dir}/access-${dt}@*.log > ${dir}/${file}
+      INFO "Removing consolidated logs"
+      rm -f ${dir}/access-${dt}@*.log
+    fi
+    if [ -f ${dir}/error.log ]; then
+      INFO "Renaming error log files for date ${dt}"
+      mv -f ${dir}/error.log ${dir}/error-${dt}.log
+    fi
+  done
+}
+
+command_purge_logs() {
+  local path=${NGINX_LOG_PATH}
+  local dt=$(date -d @$(( $(date +"%s") - 2592000)) +"%Y-%m-%d")
+  local file="access-${dt}.log"
+  # Purge in root
+  DEBUG "Purging log files in ${path}"
+  rm -f ${path}/access-${dt}.log
+  rm -f ${path}/error-${dt}.log
+  rm -f ${path}/modsec_audit-${dt}.log
+  for dir in $(find /var/log/nginx -type d); do
+    DEBUG "Deleting log files older than 30 days in ${dir}"
+    rm -f ${dir}/access-${dt}*.log
+    rm -f ${dir}/error-${dt}*.log
+  done
+}
 ###############################################################################
 #                                 Main Section                                #
 ###############################################################################
