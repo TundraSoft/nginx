@@ -1,1 +1,1 @@
-$ACME_RENEW nginx-ctl ssl-renew >> /var/log/nginx/acme.log 2>&1
+$ACME_RENEW nginx-ctl acme-renew >> /var/log/nginx/acme.log 2>&1

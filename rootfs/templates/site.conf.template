@@ -30,7 +30,8 @@ server {
   access_log                      /var/log/nginx/$server_name/access-$log_date.log  main;
   error_log                       /var/log/nginx/$PRIMARY_DOMAIN/error.log;
   root                            /app/web/$server_name;
-  vhost_traffic_status_filter_by_set_key $geoip_country_code country::$server_name;
+  
+  include /etc/nginx/conf.d/default-vts.conf;
   ###################################################
   # www -> no www redirect
   ###################################################

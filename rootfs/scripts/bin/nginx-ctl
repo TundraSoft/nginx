@@ -265,14 +265,20 @@ command_configure() {
     done
   fi
 
+  DEBUG "Creating VTS config for sites"
+  cp /templates/default-vts.conf.template /tmp/config/conf.d/default-vts.conf
+
+  DEBUG "Enabling GEOIP and related configs"
   # Maxmind
   if [ -f "${MAXMIND_PATH}/maxmind.mmdb" ]; then
-    INFO "Generating maxmind-${OPT_MAXMIND_DATABASE} config"
+    INFO "Enabling configuration related to MaxMing GEOIP"
     if [ "${OPT_MAXMIND_DATABASE}" == "City" ]; then
       cp /templates/maxmind-city.conf.template /tmp/config/conf.d/maxmind.conf
     else
       cp /templates/maxmind-country.conf.template /tmp/config/conf.d/maxmind.conf
     fi
+    # Enable vts geoip
+    sed -i 's|#vhost_traffic_status_filter_by_set_key $geoip_country_code country::$server_name;|vhost_traffic_status_filter_by_set_key $geoip_country_code country::$server_name;|' /tmp/config/conf.d/default-vts.conf
   fi
   # ACME Stateless
   if [ "${OPT_ACME_THUMBPRINT}" != "" ]; then
@@ -282,11 +288,10 @@ command_configure() {
   fi
 
   # Modsecurity
-  DEBUG "ModSecurity"
+  DEBUG "Enabling ModSecurity"
   configure_modsecurity
   
-  DEBUG "Modsecurity configuration completed"
-
+  DEBUG "Generating main nginx config"
   # NGINX.conf
   export NGINX_CACHE_PATH=$NGINX_CACHE_PATH OPT_NGINX_MAX_BODY_SIZE=$OPT_NGINX_MAX_BODY_SIZE
   envsubst '$NGINX_CACHE_PATH,$OPT_NGINX_MAX_BODY_SIZE' < /templates/nginx.conf.template > /tmp/config/nginx.conf
@@ -302,10 +307,12 @@ command_configure() {
     # Enable in nginx.conf
     sed -i 's|#include /etc/nginx/conf.d/acme-stateless.conf;|include /etc/nginx/conf.d/acme-stateless.conf;|' /tmp/config/nginx.conf
   fi
+
   INFO "Generated Configs"
   INFO "nginx.conf                : Main NGINX Configuration"
   INFO "modules.conf              : Modules to be imported"
   INFO "whitelist.conf            : Whitelisted IPs for sensitive path access"
+  INFO "default-vts.conf          : VTS configuration for sites. Has config for geoip etc"
   if [ -f /tmp/config/maxmind.conf ]; then
     INFO "maxmind.conf              : Maxmind GeoIP config (${OPT_MAXMIND_EDITION}-${OPT_MAXMIND_DATABASE})"
   fi
@@ -330,24 +337,26 @@ command_configure() {
 
 command_reload() {
   if [ $(whoami) == "root" ]; then
-    local CONFIG_HASH=$(su -s /bin/sh -c 'nginx -T' tundra | sha512sum | sed "s/ *\-$//")
-    local HASH_FILE=/tmp/nginx.hash
-    local CURRENT_HASH=
-    if [ -f "${HASH_FILE}" ]; then
-      # Load the value
-      CURRENT_HASH=$(cat ${HASH_FILE})
-    fi
-    DEBUG "Config Hash    : ${CONFIG_HASH}"
-    DEBUG "Current Hash   : ${CURRENT_HASH}"
-    DEBUG "Force Flag     : ${OPT_FORCE}"
-    if [ "$CURRENT_HASH" != $CONFIG_HASH ] || [ "$OPT_FORCE" == 1 ]; then
-      if ! su -s /bin/sh -c 'nginx -t' tundra; then
-        ERROR "Invalid nginx config. Ignoring changes."
-      fi
-      if ! su -s /bin/sh -c 'nginx -s reload' tundra; then
-        ERROR "Failed to reload nginx config"
-      fi
-    fi
+    su -s /bin/sh -c 'nginx-ctl reload' tundra
+    # local CONFIG_HASH=$(su -s /bin/sh -c 'nginx -T' tundra | sha512sum | sed "s/ *\-$//")
+    # local HASH_FILE=/tmp/nginx.hash
+    # local CURRENT_HASH=
+    # if [ -f "${HASH_FILE}" ]; then
+    #   # Load the value
+    #   CURRENT_HASH=$(cat ${HASH_FILE})
+    # fi
+    # INFO "Config Hash    : ${CONFIG_HASH}"
+    # INFO "Current Hash   : ${CURRENT_HASH}"
+    # INFO "Force Flag     : ${OPT_FORCE}"
+    # if [ "$CURRENT_HASH" != $CONFIG_HASH ] || [ "$OPT_FORCE" == 1 ]; then
+    #   if ! su -s /bin/sh -c 'nginx -t' tundra; then
+    #     ERROR "Invalid nginx config. Ignoring changes."
+    #   fi
+    #   if ! su -s /bin/sh -c 'nginx -s reload' tundra; then
+    #     ERROR "Failed to reload nginx config"
+    #   fi
+    # fi
+    # cat ${CURRENT_HASH} > ${HASH_FILE}
   else
     local CONFIG_HASH=$(nginx -T | sha512sum | sed "s/ *\-$//")
     local HASH_FILE=/tmp/nginx.hash
@@ -356,17 +365,20 @@ command_reload() {
       # Load the value
       CURRENT_HASH=$(cat ${HASH_FILE})
     fi
-    DEBUG "Config Hash    : ${CONFIG_HASH}"
-    DEBUG "Current Hash   : ${CURRENT_HASH}"
-    DEBUG "Force Flag     : ${OPT_FORCE}"
+    INFO "Config Hash    : ${CONFIG_HASH}"
+    INFO "Current Hash   : ${CURRENT_HASH}"
+    INFO "Force Flag     : ${OPT_FORCE}"
     if [ "$CURRENT_HASH" != $CONFIG_HASH ] || [ "$OPT_FORCE" == 1 ]; then
+      INFO "Hash mismatch. Testing current config"
       if ! nginx -t; then
         ERROR "Invalid nginx config. Ignoring changes."
       fi
+      INFO "Reloading nginx config"
       if ! nginx -s reload; then
         ERROR "Failed to reload nginx config"
       fi
     fi
+    echo ${CONFIG_HASH} > ${HASH_FILE}
   fi
 }
 
@@ -395,17 +407,25 @@ command_list_sites() {
 
 command_add_site() {
   local SSL_REPLACE_NAME='$server_name'
+  local SSL_ENABLED=0
   if [ "${OPT_PRIMARY_DOMAIN}" == "" ]; then
     ERROR "Atleast one value for domain must be passed"
   fi
-  if [ -f ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf ] || [ -f ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf.disabled ]; then
+  if [ -f "${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf" ] || [ -f "${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf.disabled" ]; then
     ERROR "Configutation for domain ${OPT_PRIMARY_DOMAIN} already exists!"
   fi
   if [ "${OPT_USE_SSL}" != "" ]; then
-    SSL_REPLACE_NAME=OPT_USE_SSL
+    # Check if the certificate exists
+    if [ ! -f "${NGINX_CERT_PATH}/${OPT_USE_SSL}.key" ] || [ ! -f "${NGINX_CERT_PATH}/${OPT_USE_SSL}.crt" ]; then
+      ERROR "Certificate ${OPT_USE_SSL} does not exist!"
+    fi
+    SSL_REPLACE_NAME=${OPT_USE_SSL}
+    SSL_ENABLED=1
   fi
+
   if [ "${OPT_SSL_GENERATE}" == 1 ]; then
     command_ssl_generate
+    SSL_ENABLED=1
   fi
 
   # Lets create directories
@@ -419,7 +439,7 @@ command_add_site() {
   export PRIMARY_DOMAIN=$OPT_PRIMARY_DOMAIN ALL_DOMAINS=$OPT_DOMAINS NGINX_CACHE_PATH=$NGINX_CACHE_PATH
   envsubst '$PRIMARY_DOMAIN, $ALL_DOMAINS, $NGINX_CACHE_PATH' < /templates/site.conf.template > ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
 
-  if [ -f ${NGINX_CERT_PATH}/${SSL_REPLACE_NAME}.key ] && [ -f ${NGINX_CERT_PATH}/${SSL_REPLACE_NAME}.crt ];
+  if [ "${SSL_ENABLED}" == 1 ];
   then
     DEBUG "Updating config to enable ssl"
     sed -i 's|#listen 443 ssl;|listen 443 ssl;|' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
@@ -449,7 +469,9 @@ command_add_site() {
   INFO "Ensuring right permissions are present"
   setgroup ${NGINX_WEBROOT_PATH}/${OPT_PRIMARY_DOMAIN}
   setgroup ${NGINX_LOG_PATH}/${OPT_PRIMARY_DOMAIN}
-  setgroup ${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN}*
+  if [ "${OPT_USE_SSL}" != "" ]; then
+    setgroup ${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN}*
+  fi
   setgroup ${NGINX_CACHE_PATH}/${OPT_PRIMARY_DOMAIN}
   setgroup ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
   
@@ -827,7 +849,7 @@ command_maxmind_fetch() {
   INFO "EDITION       : ${OPT_MAXMIND_EDITION}"
   INFO "DATABASE      : ${OPT_MAXMIND_DATABASE}"
   INFO "BACKUP        : ${OPT_BACKUP}"
-  INFO "DOWNLOAD URL  : ${DOWNLOAD_URL}"
+  # INFO "DOWNLOAD URL  : ${DOWNLOAD_URL}"
   
   DEBUG "Maxmind - Downloading ${DOWNLOAD_FILE} from ${DOWNLOAD_URL}"
   mkdir -p /tmp/maxmind
@@ -841,7 +863,7 @@ command_maxmind_fetch() {
   DEBUG "Maxmind - Extracted the archive"
   mv /tmp/maxmind/${DOWNLOAD_FILE}.mmdb /tmp/maxmind/maxmind.mmdb
   # Take backup of existing file
-  if [ -f "${MAXMIND_PATH}/maxmind.mmdb" ] && [ ${OPT_BACKUP} == 1 ]; then
+  if [ -f "${MAXMIND_PATH}/maxmind.mmdb" ] && [ "${OPT_BACKUP}" == 1 ]; then
     DEBUG "Maxmind - Backing up existing db file"
     mv "${MAXMIND_PATH}/maxmind.mmdb" "${MAXMIND_PATH}/maxmind-$(date +%Y-%m-%d).mmdb"
     setgroup "${MAXMIND_PATH}/maxmind-$(date +%Y-%m-%d).mmdb"
