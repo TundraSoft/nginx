@@ -22,9 +22,16 @@ MODSEC_UPLOAD_DIR=${MODSEC_UPLOAD_DIR:-/tmp/modsecurity/upload}
 # Supports comma seperated list example 1.1.1.1,10.0.0.0/24
 # If none mentioned then you wont be able to access the sensitive parts!
 OPT_NGINX_WHITELIST_IP=${NGINX_WHITELIST_IP:-}
-if [ -f /run/secrets/NGINX_WHITELIST_IP ]; then
-  OPT_NGINX_WHITELIST_IP=$(cat /run/secrets/NGINX_WHITELIST_IP)
+# if [ -z "${OPT_NGINX_WHITELIST_IP}" ]; then
+#   OPT_NGINX_WHITELIST_IP=$(curl -s https://api.ipify.org)
+# fi
+# If the value of NGINX_WHITELIST_IP is like /run/secrets, then its docket secret, so load from it
+if [[ "${NGINX_WHITELIST_IP}" = "/run/secrets/*" ]] && [ -f "${NGINX_WHITELIST_IP}" ]; then
+  OPT_NGINX_WHITELIST_IP=$(cat ${NGINX_WHITELIST_IP})
 fi
+# if [ -f /run/secrets/NGINX_WHITELIST_IP ]; then
+#   OPT_NGINX_WHITELIST_IP=$(cat /run/secrets/NGINX_WHITELIST_IP)
+# fi
 
 # Max body size (client upload) Can and should be overriden in server block
 OPT_NGINX_MAX_BODY_SIZE=${NGINX_MAX_UPLOAD_SIZE:-'100M'}
@@ -56,10 +63,10 @@ OPT_MODSEC_CRS_REPORTING_LEVEL=2
 OPT_MODSEC_AUDIT_ENGINE="RelevantOnly"
 OPT_MODSEC_AUDIT_LOG_FORMAT=JSON
 OPT_MODSEC_AUDIT_LOG_TYPE=Serial
-OPT_MODSEC_AUDIT_LOG=/var/log/nginx/$server_name/audit.log
+OPT_MODSEC_AUDIT_LOG=${NGINX_LOG_PATH}/$server_name/audit.log
 OPT_MODSEC_AUDIT_LOG_PARTS='ABIJDEFHZ'
-OPT_MODSEC_AUDIT_STORAGE=/var/log/nginx/modsecurity/
-OPT_MODSEC_DATA_DIR=/tmp/modsecurity/data
+OPT_MODSEC_AUDIT_STORAGE=${MODSEC_AUDIT_STORAGE}
+OPT_MODSEC_DATA_DIR=${MODSEC_DATA_DIR}
 OPT_MODSEC_DEBUG_LOG=/dev/null
 OPT_MODSEC_DEBUG_LOGLEVEL=0
 OPT_MODSEC_DEFAULT_PHASE1_ACTION="phase:1,pass,log,tag:'\${MODSEC_TAG}'"
@@ -78,15 +85,18 @@ OPT_MODSEC_RESP_BODY_MIMETYPE="text/plain text/html text/xml"
 OPT_MODSEC_RULE_ENGINE=on
 OPT_MODSEC_STATUS_ENGINE="Off"
 OPT_MODSEC_TAG=modsecurity
-OPT_MODSEC_TMP_DIR=/tmp/modsecurity/tmp
+OPT_MODSEC_TMP_DIR=${MODSEC_TMP_DIR}
 OPT_MODSEC_TMP_SAVE_UPLOADED_FILES="on"
-OPT_MODSEC_UPLOAD_DIR=/tmp/modsecurity/upload
+OPT_MODSEC_UPLOAD_DIR=${MODSEC_UPLOAD_DIR}
 
 # MAXMIND CONFIG
 OPT_MAXMIND_KEY=${MAXMIND_KEY}
 # Overload with secrets if it exists
-if [ -f /run/secrets/MAXMIND_KEY ]; then
-  OPT_MAXMIND_KEY=$(cat /run/secrets/MAXMIND_KEY)
+# if [ -f /run/secrets/MAXMIND_KEY ]; then
+#   OPT_MAXMIND_KEY=$(cat /run/secrets/MAXMIND_KEY)
+# fi
+if [[ "${MAXMIND_KEY}" = "/run/secrets/*" ]] && [ -f "${MAXMIND_KEY}" ]; then
+  OPT_MAXMIND_KEY=$(cat ${MAXMIND_KEY})
 fi
 OPT_MAXMIND_EDITION=${MAXMIND_EDITION:-'geolite2'}
 OPT_MAXMIND_DATABASE=${MAXMIND_DATABASE:-'city'}
