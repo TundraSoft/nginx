@@ -482,7 +482,9 @@ command_add_site() {
   if [ "${OPT_USE_SSL}" == "" ]; then
     setgroup ${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN}*
   else
-    setgroup ${NGINX_CERT_PATH}/${SSL_REPLACE_NAME}*
+    if [ -f setgroup ${NGINX_CERT_PATH}/${SSL_REPLACE_NAME}* ]; then
+      setgroup ${NGINX_CERT_PATH}/${SSL_REPLACE_NAME}*
+    fi
   fi
   setgroup ${NGINX_CACHE_PATH}/${OPT_PRIMARY_DOMAIN}
   setgroup ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
