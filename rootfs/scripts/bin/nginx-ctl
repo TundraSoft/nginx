@@ -644,32 +644,32 @@ configure_modsecurity() {
   fi
 
   # Block request if number of arguments is too high
-  if [ -n "${OPT_MODSEC_CRS_MAX_NUM_ARGS}" ]; then
+  if [ "${OPT_MODSEC_CRS_MAX_NUM_ARGS}" ] && [[ "${OPT_MODSEC_CRS_MAX_NUM_ARGS}" =~ ^[\-0-9]+$ ]]; then
     sed -z -E -i 's/#SecAction[^"]+"id:900300.*tx\.max_num_args=255\"/SecAction \\\n  \"id:900300, \\\n   phase:1, \\\n   nolog, \\\n   pass, \\\n   t:none, \\\n   setvar:tx.max_num_args='"${OPT_MODSEC_CRS_MAX_NUM_ARGS}"'\"/' "${setup_conf_path}"
   fi
 
   # Block request if the length of any argument name is too high
-  if [ -n "${OPT_MODSEC_CRS_ARG_NAME_LENGTH}" ]; then
+  if [ -n "${OPT_MODSEC_CRS_ARG_NAME_LENGTH}" ] && [[ "${OPT_MODSEC_CRS_ARG_NAME_LENGTH}" =~ ^[\-0-9]+$ ]]; then
     sed -z -E -i 's/#SecAction[^"]+"id:900310.*tx\.arg_name_length=100\"/SecAction \\\n \"id:900310, \\\n   phase:1, \\\n   nolog, \\\n   pass, \\\n   t:none, \\\n   setvar:tx.arg_name_length='"${OPT_MODSEC_CRS_ARG_NAME_LENGTH}"'\"/' "${setup_conf_path}"
   fi
 
   # Block request if the length of any argument value is too high
-  if [ -n "${OPT_MODSEC_CRS_ARG_LENGTH}" ]; then
+  if [ -n "${OPT_MODSEC_CRS_ARG_LENGTH}" ] && [[ "${OPT_MODSEC_CRS_ARG_LENGTH}" =~ ^[\-0-9]+$ ]]; then
     sed -z -E -i 's/#SecAction[^"]+"id:900320.*tx\.arg_length=400\"/SecAction \\\n  \"id:900320, \\\n   phase:1, \\\n   nolog, \\\n   pass, \\\n   t:none, \\\n   setvar:tx.arg_length='"${OPT_MODSEC_CRS_ARG_LENGTH}"'\"/' "${setup_conf_path}"
   fi
 
   # Block request if the total length of all combined arguments is too high
-  if [ -n "${OPT_MODSEC_CRS_TOTAL_ARG_LENGTH}" ]; then
+  if [ -n "${OPT_MODSEC_CRS_TOTAL_ARG_LENGTH}" ] && [[ "${OPT_MODSEC_CRS_TOTAL_ARG_LENGTH}" =~ ^[\-0-9]+$ ]]; then
     sed -z -E -i 's/#SecAction[^"]+"id:900330.*tx\.total_arg_length=64000\"/SecAction \\\n  \"id:900330, \\\n   phase:1, \\\n   nolog, \\\n   pass, \\\n  t:none, \\\n   setvar:tx.total_arg_length='"${OPT_MODSEC_CRS_TOTAL_ARG_LENGTH}"'\"/' "${setup_conf_path}"
   fi
 
   # Block request if the total length of all combined arguments is too high
-  if [ -n "${OPT_MODSEC_CRS_MAX_FILE_SIZE}" ]; then
+  if [ -n "${OPT_MODSEC_CRS_MAX_FILE_SIZE}" ] && [[ "${OPT_MODSEC_CRS_MAX_FILE_SIZE}" =~ ^[\-0-9]+$ ]]; then
     sed -z -E -i 's/#SecAction[^"]+"id:900340.*tx\.max_file_size=1048576\"/SecAction \\\n  \"id:900340, \\\n   phase:1, \\\n   nolog, \\\n   pass, \\\n   t:none, \\\n   setvar:tx.max_file_size='"${OPT_MODSEC_CRS_MAX_FILE_SIZE}"'\"/' "${setup_conf_path}"
   fi
 
   # Block request if the total size of all combined uploaded files is too high
-  if [ -n "${OPT_MODSEC_CRS_COMBINED_FILE_SIZES}" ]; then
+  if [ -n "${OPT_MODSEC_CRS_COMBINED_FILE_SIZES}" ] && [[ "${OPT_MODSEC_CRS_COMBINED_FILE_SIZES}" =~ ^[\-0-9]+$ ]]; then
     sed -z -E -i 's/#SecAction[^"]+"id:900350.*tx\.combined_file_sizes=1048576\"/SecAction \\\n  \"id:900350, \\\n   phase:1, \\\n   nolog, \\\n   pass, \\\n   t:none, \\\n   setvar:tx.combined_file_sizes='"${OPT_MODSEC_CRS_COMBINED_FILE_SIZES}"'\"/' "${setup_conf_path}"
   fi
 
