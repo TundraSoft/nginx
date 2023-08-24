@@ -2,7 +2,7 @@
 LOCKFILE=/var/log/nginx/nginx-ctl.lock
 
 # Load Defaults from config
-source /app/config.sh
+source /scripts/nginx-ctl-config.sh
 
 OPT_FORCE=0
 OPT_DEBUG=1
@@ -919,6 +919,16 @@ while [ "$#" -gt 0 ]; do
       shift
       ;;
     -d | --domain)
+      if [ "${1//\'/}" == "" ]; then
+        ERROR "Domain cannot be empty"
+      fi
+      if [ "${1//\'/}" == "acme" ] || [ "${1//\'/}" == "default" ]; then
+        ERROR "Invalid/Reserved domain name ${1//\'/}"
+      fi
+      # Check if the domain is valid
+      if ! echo "${1//\'/}" | grep -qE '^([a-z0-9]+(-[a-z0-9]+)*\.)+[a-z]{2,}$'; then
+        ERROR "Invalid domain name ${1//\'/}"
+      fi
       if [ -z "${OPT_PRIMARY_DOMAIN}" ]; then
         OPT_PRIMARY_DOMAIN=${1//\'/}
         OPT_DOMAINS="${1//\'/}"
