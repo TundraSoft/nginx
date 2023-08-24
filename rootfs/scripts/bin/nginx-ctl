@@ -2,14 +2,19 @@
 LOCKFILE=/var/log/nginx/nginx-ctl.lock
 
 # Load Defaults from config
-source /app/config.sh
+source /scripts/nginx-ctl-config.sh
 
 OPT_FORCE=0
 OPT_DEBUG=1
 OPT_PRIMARY_DOMAIN=
 OPT_DOMAINS=
 OPT_WITH_MODSECURITY=0
-OPT_SSL_MODE='auto'
+OPT_ENABLE_STUB_STATUS=0
+OPT_ENABLE_PING=0
+OPT_ENABLE_FAVEICO=0
+OPT_SSL_GENERATE=0
+OPT_SSL_TYPE='acme'
+OPT_USE_SSL=
 
 print_message() {
   local message_type=$1
@@ -98,8 +103,13 @@ usage() {
   echo "  add-site                        Add new site"
   echo "    Options:"
   echo "      -d, --domain <TLD>          The domain for which to create the site. If multiple domains are specified, then the first domain will be used as the primary domain"
-  echo "          --ssl-mode <SSL_MODE>   SSL Mode to be used, auto, none, acme, self"
+  echo "          --ssl-generate          Flag to enable ssl generation"
+  echo "          --ssl-type <ACME|SELF>  If ssl-generate is enabled then this must be set. Defines if acme ssl certificate is to be generated or self signed"
+  echo "          --use-ssl <SITE>        Use existing SSL certificate"
   echo "          --with-modsecurity      Enable modsecurity with default rules on this site"
+  echo "          --enable-stub-status    Enable nginx stub status. Will be available in /healthz"
+  echo "          --enable-ping           Enable ping pong location. Defaults to /ping"
+  echo "          --enable-faveico        Add faveicon patch - Prevent logging and 404 not found"
   echo
   echo "  list-sites                      List all sites"
   echo
@@ -142,8 +152,8 @@ usage() {
   echo "  ssl-generate                    Generate SSL certificate"
   echo "    Options:"
   echo "      -d, --domain <TLD>          The domain for which to create the SSL. If multiple domains are specified, then the first domain will be used as the primary domain"
-  echo "          --ssl-mode <SSL_MODE>   SSL Mode to be used, auto, none, acme, self. Defaults to auto"
-  echo "          --server <SERVER>       The server with which to register, default is letsencrypt"
+  echo "          --ssl-type <TYPE>       Can be self or acme. Defaults to acme"
+  echo "          --server <SERVER>       The server with which to register, default is letsencrypt. Required for ACME type"
   echo
   echo "  ssl-renew                       Renew certificate. If domain is not specified, then all certificates will be renewed"
   echo "    Options:"
@@ -158,6 +168,16 @@ usage() {
   echo "          --key <KEY>             The MaxMind license key"
   echo "          --edition <EDITION>     The MaxMind edition to download, defaults to geoip2lite"
   echo "          --database <DATABASE>   The MaxMind database to download, defaults to city"
+  echo
+  echo "-------------------------------------------------------------------------------"
+  echo "-                                Log Management                               -"
+  echo "-------------------------------------------------------------------------------"
+  echo
+  echo "  consolidate-logs                Consolidate log files"
+  echo 
+  echo "  purge-logs                      Purge log files"
+  # echo "    Options:"
+  # echo "      -d, --days <DAYS>           The number of days to keep logs for, defaults to 30"
   echo
   echo "Options:"
   echo "  -h, --help                      Show this help message and exit"
@@ -186,7 +206,8 @@ command_initialize() {
   setgroup /etc/nginx
   setgroup /usr/local/nginx
 
-  for i in /app /templates ${MAXMIND_PATH} ${MODSEC_AUDIT_STORAGE} ${MODSEC_DATA_DIR} ${MODSEC_TMP_DIR} ${MODSEC_UPLOAD_DIR} ${NGINX_CACHE_DIR} ${NGINX_CERT_PATH} ${NGINX_LOG_PATH} /scripts 
+  # ${MODSEC_AUDIT_STORAGE} is inside nginx log path
+  for i in /app /templates ${MODSEC_DATA_DIR} ${MODSEC_TMP_DIR} ${MODSEC_UPLOAD_DIR} ${NGINX_CACHE_DIR} ${NGINX_LOG_PATH} 
   do
     if [ ! -d "${i}" ]
     then
@@ -254,14 +275,20 @@ command_configure() {
     done
   fi
 
+  DEBUG "Creating VTS config for sites"
+  cp /templates/default-vts.conf.template /tmp/config/conf.d/default-vts.conf
+
+  DEBUG "Enabling GEOIP and related configs"
   # Maxmind
   if [ -f "${MAXMIND_PATH}/maxmind.mmdb" ]; then
-    INFO "Generating maxmind-${OPT_MAXMIND_DATABASE} config"
+    INFO "Enabling configuration related to MaxMing GEOIP"
     if [ "${OPT_MAXMIND_DATABASE}" == "City" ]; then
       cp /templates/maxmind-city.conf.template /tmp/config/conf.d/maxmind.conf
     else
       cp /templates/maxmind-country.conf.template /tmp/config/conf.d/maxmind.conf
     fi
+    # Enable vts geoip
+    sed -i 's|#vhost_traffic_status_filter_by_set_key $geoip_country_code country::$server_name;|vhost_traffic_status_filter_by_set_key $geoip_country_code country::$server_name;|' /tmp/config/conf.d/default-vts.conf
   fi
   # ACME Stateless
   if [ "${OPT_ACME_THUMBPRINT}" != "" ]; then
@@ -271,11 +298,10 @@ command_configure() {
   fi
 
   # Modsecurity
-  DEBUG "ModSecurity"
+  DEBUG "Enabling ModSecurity"
   configure_modsecurity
   
-  DEBUG "Modsecurity configuration completed"
-
+  DEBUG "Generating main nginx config"
   # NGINX.conf
   export NGINX_CACHE_PATH=$NGINX_CACHE_PATH OPT_NGINX_MAX_BODY_SIZE=$OPT_NGINX_MAX_BODY_SIZE
   envsubst '$NGINX_CACHE_PATH,$OPT_NGINX_MAX_BODY_SIZE' < /templates/nginx.conf.template > /tmp/config/nginx.conf
@@ -291,10 +317,12 @@ command_configure() {
     # Enable in nginx.conf
     sed -i 's|#include /etc/nginx/conf.d/acme-stateless.conf;|include /etc/nginx/conf.d/acme-stateless.conf;|' /tmp/config/nginx.conf
   fi
+
   INFO "Generated Configs"
   INFO "nginx.conf                : Main NGINX Configuration"
   INFO "modules.conf              : Modules to be imported"
   INFO "whitelist.conf            : Whitelisted IPs for sensitive path access"
+  INFO "default-vts.conf          : VTS configuration for sites. Has config for geoip etc"
   if [ -f /tmp/config/maxmind.conf ]; then
     INFO "maxmind.conf              : Maxmind GeoIP config (${OPT_MAXMIND_EDITION}-${OPT_MAXMIND_DATABASE})"
   fi
@@ -319,24 +347,26 @@ command_configure() {
 
 command_reload() {
   if [ $(whoami) == "root" ]; then
-    local CONFIG_HASH=$(su -s /bin/sh -c 'nginx -T' tundra | sha512sum | sed "s/ *\-$//")
-    local HASH_FILE=/tmp/nginx.hash
-    local CURRENT_HASH=
-    if [ -f "${HASH_FILE}" ]; then
-      # Load the value
-      CURRENT_HASH=$(cat ${HASH_FILE})
-    fi
-    DEBUG "Config Hash    : ${CONFIG_HASH}"
-    DEBUG "Current Hash   : ${CURRENT_HASH}"
-    DEBUG "Force Flag     : ${OPT_FORCE}"
-    if [ "$CURRENT_HASH" != $CONFIG_HASH ] || [ "$OPT_FORCE" == 1 ]; then
-      if ! su -s /bin/sh -c 'nginx -t' tundra; then
-        ERROR "Invalid nginx config. Ignoring changes."
-      fi
-      if ! su -s /bin/sh -c 'nginx -s reload' tundra; then
-        ERROR "Failed to reload nginx config"
-      fi
-    fi
+    su -s /bin/sh -c 'nginx-ctl reload' tundra
+    # local CONFIG_HASH=$(su -s /bin/sh -c 'nginx -T' tundra | sha512sum | sed "s/ *\-$//")
+    # local HASH_FILE=/tmp/nginx.hash
+    # local CURRENT_HASH=
+    # if [ -f "${HASH_FILE}" ]; then
+    #   # Load the value
+    #   CURRENT_HASH=$(cat ${HASH_FILE})
+    # fi
+    # INFO "Config Hash    : ${CONFIG_HASH}"
+    # INFO "Current Hash   : ${CURRENT_HASH}"
+    # INFO "Force Flag     : ${OPT_FORCE}"
+    # if [ "$CURRENT_HASH" != $CONFIG_HASH ] || [ "$OPT_FORCE" == 1 ]; then
+    #   if ! su -s /bin/sh -c 'nginx -t' tundra; then
+    #     ERROR "Invalid nginx config. Ignoring changes."
+    #   fi
+    #   if ! su -s /bin/sh -c 'nginx -s reload' tundra; then
+    #     ERROR "Failed to reload nginx config"
+    #   fi
+    # fi
+    # cat ${CURRENT_HASH} > ${HASH_FILE}
   else
     local CONFIG_HASH=$(nginx -T | sha512sum | sed "s/ *\-$//")
     local HASH_FILE=/tmp/nginx.hash
@@ -345,17 +375,20 @@ command_reload() {
       # Load the value
       CURRENT_HASH=$(cat ${HASH_FILE})
     fi
-    DEBUG "Config Hash    : ${CONFIG_HASH}"
-    DEBUG "Current Hash   : ${CURRENT_HASH}"
-    DEBUG "Force Flag     : ${OPT_FORCE}"
+    INFO "Config Hash    : ${CONFIG_HASH}"
+    INFO "Current Hash   : ${CURRENT_HASH}"
+    INFO "Force Flag     : ${OPT_FORCE}"
     if [ "$CURRENT_HASH" != $CONFIG_HASH ] || [ "$OPT_FORCE" == 1 ]; then
+      INFO "Hash mismatch. Testing current config"
       if ! nginx -t; then
         ERROR "Invalid nginx config. Ignoring changes."
       fi
+      INFO "Reloading nginx config"
       if ! nginx -s reload; then
         ERROR "Failed to reload nginx config"
       fi
     fi
+    echo ${CONFIG_HASH} > ${HASH_FILE}
   fi
 }
 
@@ -383,36 +416,59 @@ command_list_sites() {
 }
 
 command_add_site() {
+  local SSL_REPLACE_NAME='$server_name'
+  local SSL_ENABLED=0
   if [ "${OPT_PRIMARY_DOMAIN}" == "" ]; then
     ERROR "Atleast one value for domain must be passed"
   fi
-  if [ -f ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf ] || [ -f ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf.disabled ]; then
+  if [ -f "${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf" ] || [ -f "${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf.disabled" ]; then
     ERROR "Configutation for domain ${OPT_PRIMARY_DOMAIN} already exists!"
+  fi
+  if [ "${OPT_USE_SSL}" != "" ]; then
+    # Check if the certificate exists
+    if [ ! -f "${NGINX_CERT_PATH}/${OPT_USE_SSL}.key" ] || [ ! -f "${NGINX_CERT_PATH}/${OPT_USE_SSL}.crt" ]; then
+      ERROR "Certificate ${OPT_USE_SSL} does not exist!"
+    fi
+    SSL_REPLACE_NAME=${OPT_USE_SSL}
+    SSL_ENABLED=1
+  fi
+
+  if [ "${OPT_SSL_GENERATE}" == 1 ]; then
+    command_ssl_generate
+    SSL_ENABLED=1
   fi
 
   # Lets create directories
   INFO "Creating directories:"
-  INFO "${NGINX_WEBROOT_PATH}/${OPT_PRIMARY_DOMAIN}         : The webroot for this domain"
-  mkdir -p ${NGINX_WEBROOT_PATH}/${OPT_PRIMARY_DOMAIN}
-  INFO "${NGINX_LOG_PATH}/${OPT_PRIMARY_DOMAIN}             : Logs path for this domain"
-  mkdir -p ${NGINX_LOG_PATH}/${OPT_PRIMARY_DOMAIN}
-  INFO "${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN}            : Path where certificates are stored"
-  mkdir -p ${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN}
-  INFO "${NGINX_CACHE_PATH}/${OPT_PRIMARY_DOMAIN}           : Cache path"
-  mkdir -p ${NGINX_CACHE_PATH}/${OPT_PRIMARY_DOMAIN}
+  INFO "Webroot                 : ${NGINX_WEBROOT_PATH}/${OPT_PRIMARY_DOMAIN}"
+  INFO "Logs                    : ${NGINX_LOG_PATH}/${OPT_PRIMARY_DOMAIN}"
+  INFO "Cache                   : ${NGINX_CACHE_PATH}/${OPT_PRIMARY_DOMAIN}"
+  mkdir -p ${NGINX_WEBROOT_PATH}/${OPT_PRIMARY_DOMAIN} ${NGINX_LOG_PATH}/${OPT_PRIMARY_DOMAIN} ${NGINX_CACHE_PATH}/${OPT_PRIMARY_DOMAIN}
 
   # Create the file
   export PRIMARY_DOMAIN=$OPT_PRIMARY_DOMAIN ALL_DOMAINS=$OPT_DOMAINS NGINX_CACHE_PATH=$NGINX_CACHE_PATH
   envsubst '$PRIMARY_DOMAIN, $ALL_DOMAINS, $NGINX_CACHE_PATH' < /templates/site.conf.template > ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
 
-  if [ -f ${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN}/certificate.key ] && [ -f ${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN}/certificate.crt ];
+  if [ "${SSL_ENABLED}" == 1 ];
   then
     DEBUG "Updating config to enable ssl"
     sed -i 's|#listen 443 ssl;|listen 443 ssl;|' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
     sed -i 's|#listen \[::\]:443 ssl;|listen [::]:443 ssl;|' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
-    sed -i 's|#ssl_certificate /etc/nginx/certs/$primary_domain/certificate.crt;|ssl_certificate /etc/nginx/certs/$primary_domain/certificate.crt;|' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
-    sed -i 's|#ssl_certificate_key /etc/nginx/certs/$primary_domain/certificate.key;|ssl_certificate_key /etc/nginx/certs/$primary_domain/certificate.key;|' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
+    sed -i 's|#ssl_certificate /etc/nginx/certs/$server_name.crt;|ssl_certificate /etc/nginx/certs/'"${SSL_REPLACE_NAME}"'.crt;|' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
+    sed -i 's|#ssl_certificate_key /etc/nginx/certs/$server_name.key;|ssl_certificate_key /etc/nginx/certs/'"${SSL_REPLACE_NAME}"'.key;|' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
     sed -i 's|#include /etc/nginx/conf.d/ssl-config.conf;|include /etc/nginx/conf.d/ssl-config.conf;|' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
+  fi
+  if [ "${OPT_ENABLE_STUB_STATUS}" == 1 ]; then
+    DEBUG "Updating config to enable ssl"
+    sed -i 's|#include /etc/nginx/conf.d/default-location-healthz.conf;|include /etc/nginx/conf.d/default-location-healthz.conf;|' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
+  fi
+  if [ "${OPT_ENABLE_PING}" == 1 ]; then
+    DEBUG "Updating config to enable ssl"
+    sed -i 's|#include /etc/nginx/conf.d/default-location-ping;|include /etc/nginx/conf.d/default-location-ping.conf;|' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
+  fi
+  if [ "${OPT_ENABLE_FAVEICO}" == 1 ]; then
+    DEBUG "Updating config to enable ssl"
+    sed -i 's|#include /etc/nginx/conf.d/default-location-faveico.conf;|include /etc/nginx/conf.d/default-location-faveico.conf;|' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
   fi
   
   if [ "$OPT_WITH_MODSECURITY" == 1 ]; then
@@ -421,10 +477,16 @@ command_add_site() {
   fi
 
   INFO "Ensuring right permissions are present"
-  setgroup ${NGINX_WEBROOT_PATH}/${OPT_PRIMARY_DOMAIN} 
-  setgroup ${NGINX_LOG_PATH}/${OPT_PRIMARY_DOMAIN} 
-  setgroup ${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN} 
-  setgroup ${NGINX_CACHE_PATH}/${OPT_PRIMARY_DOMAIN} 
+  setgroup ${NGINX_WEBROOT_PATH}/${OPT_PRIMARY_DOMAIN}
+  setgroup ${NGINX_LOG_PATH}/${OPT_PRIMARY_DOMAIN}
+  if [ "${OPT_USE_SSL}" == "" ]; then
+    setgroup ${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN}*
+  else
+    if [ -f setgroup ${NGINX_CERT_PATH}/${SSL_REPLACE_NAME}* ]; then
+      setgroup ${NGINX_CERT_PATH}/${SSL_REPLACE_NAME}*
+    fi
+  fi
+  setgroup ${NGINX_CACHE_PATH}/${OPT_PRIMARY_DOMAIN}
   setgroup ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
   
   # if ! nginx -t; then
@@ -584,32 +646,32 @@ configure_modsecurity() {
   fi
 
   # Block request if number of arguments is too high
-  if [ -n "${OPT_MODSEC_CRS_MAX_NUM_ARGS}" ]; then
+  if [ "${OPT_MODSEC_CRS_MAX_NUM_ARGS}" ] && [[ "${OPT_MODSEC_CRS_MAX_NUM_ARGS}" =~ ^[\-0-9]+$ ]]; then
     sed -z -E -i 's/#SecAction[^"]+"id:900300.*tx\.max_num_args=255\"/SecAction \\\n  \"id:900300, \\\n   phase:1, \\\n   nolog, \\\n   pass, \\\n   t:none, \\\n   setvar:tx.max_num_args='"${OPT_MODSEC_CRS_MAX_NUM_ARGS}"'\"/' "${setup_conf_path}"
   fi
 
   # Block request if the length of any argument name is too high
-  if [ -n "${OPT_MODSEC_CRS_ARG_NAME_LENGTH}" ]; then
+  if [ -n "${OPT_MODSEC_CRS_ARG_NAME_LENGTH}" ] && [[ "${OPT_MODSEC_CRS_ARG_NAME_LENGTH}" =~ ^[\-0-9]+$ ]]; then
     sed -z -E -i 's/#SecAction[^"]+"id:900310.*tx\.arg_name_length=100\"/SecAction \\\n \"id:900310, \\\n   phase:1, \\\n   nolog, \\\n   pass, \\\n   t:none, \\\n   setvar:tx.arg_name_length='"${OPT_MODSEC_CRS_ARG_NAME_LENGTH}"'\"/' "${setup_conf_path}"
   fi
 
   # Block request if the length of any argument value is too high
-  if [ -n "${OPT_MODSEC_CRS_ARG_LENGTH}" ]; then
+  if [ -n "${OPT_MODSEC_CRS_ARG_LENGTH}" ] && [[ "${OPT_MODSEC_CRS_ARG_LENGTH}" =~ ^[\-0-9]+$ ]]; then
     sed -z -E -i 's/#SecAction[^"]+"id:900320.*tx\.arg_length=400\"/SecAction \\\n  \"id:900320, \\\n   phase:1, \\\n   nolog, \\\n   pass, \\\n   t:none, \\\n   setvar:tx.arg_length='"${OPT_MODSEC_CRS_ARG_LENGTH}"'\"/' "${setup_conf_path}"
   fi
 
   # Block request if the total length of all combined arguments is too high
-  if [ -n "${OPT_MODSEC_CRS_TOTAL_ARG_LENGTH}" ]; then
+  if [ -n "${OPT_MODSEC_CRS_TOTAL_ARG_LENGTH}" ] && [[ "${OPT_MODSEC_CRS_TOTAL_ARG_LENGTH}" =~ ^[\-0-9]+$ ]]; then
     sed -z -E -i 's/#SecAction[^"]+"id:900330.*tx\.total_arg_length=64000\"/SecAction \\\n  \"id:900330, \\\n   phase:1, \\\n   nolog, \\\n   pass, \\\n  t:none, \\\n   setvar:tx.total_arg_length='"${OPT_MODSEC_CRS_TOTAL_ARG_LENGTH}"'\"/' "${setup_conf_path}"
   fi
 
   # Block request if the total length of all combined arguments is too high
-  if [ -n "${OPT_MODSEC_CRS_MAX_FILE_SIZE}" ]; then
+  if [ -n "${OPT_MODSEC_CRS_MAX_FILE_SIZE}" ] && [[ "${OPT_MODSEC_CRS_MAX_FILE_SIZE}" =~ ^[\-0-9]+$ ]]; then
     sed -z -E -i 's/#SecAction[^"]+"id:900340.*tx\.max_file_size=1048576\"/SecAction \\\n  \"id:900340, \\\n   phase:1, \\\n   nolog, \\\n   pass, \\\n   t:none, \\\n   setvar:tx.max_file_size='"${OPT_MODSEC_CRS_MAX_FILE_SIZE}"'\"/' "${setup_conf_path}"
   fi
 
   # Block request if the total size of all combined uploaded files is too high
-  if [ -n "${OPT_MODSEC_CRS_COMBINED_FILE_SIZES}" ]; then
+  if [ -n "${OPT_MODSEC_CRS_COMBINED_FILE_SIZES}" ] && [[ "${OPT_MODSEC_CRS_COMBINED_FILE_SIZES}" =~ ^[\-0-9]+$ ]]; then
     sed -z -E -i 's/#SecAction[^"]+"id:900350.*tx\.combined_file_sizes=1048576\"/SecAction \\\n  \"id:900350, \\\n   phase:1, \\\n   nolog, \\\n   pass, \\\n   t:none, \\\n   setvar:tx.combined_file_sizes='"${OPT_MODSEC_CRS_COMBINED_FILE_SIZES}"'\"/' "${setup_conf_path}"
   fi
 
@@ -685,12 +747,108 @@ command_acme_register(){
   fi
 }
 
-command_ssl_generate() {
-  echo "Not Implemented"
+move_certificates() {
+  local SRC_CRT_FILE=$1
+  local SRC_KEY_FILE=$2
+  local DST_CRT_FILE=$3
+  local DST_KEY_FILE=$4
+  DEBUG "Moving certificate and key files"
+  DEBUG "SOURCE CERTIFICATE               : ${SRC_CRT_FILE}"
+  DEBUG "SOURCE KEY                       : ${SRC_KEY_FILE}"
+  DEBUG "DESTINATION CERTIFICATE          : ${DST_CRT_FILE}"
+  DEBUG "DESTINATION KEY                  : ${DST_KEY_FILE}"
+  # Check if cert already exists if so backup and move
+  if [ -f $DST_KEY_FILE ]; then
+    DEBUG "Backing up old certificate"
+    mv $DST_CRT_FILE $DST_CRT_FILE.$(date +%Y-%m-%d)
+  fi
+  if [ -f $DST_KEY_FILE ]; then
+  DEBUG "Backing up old key"
+    mv $DST_KEY_FILE $DST_KEY_FILE.$(date +%Y-%m-%d)
+  fi
+  # Move
+  DEBUG "Moving certificate & key"
+  cp -f $SRC_CRT_FILE $DST_CRT_FILE
+  cp -f $SRC_KEY_FILE $DST_KEY_FILE
+  # Permissions
+  DEBUG "Setting permissions"
+  setgroup $DST_CRT_FILE $DST_KEY_FILE
 }
 
-command_ssl_renew() {
-  echo "Not implemented"
+command_ssl_generate() {
+  if [ "${OPT_PRIMARY_DOMAIN}" == "" ]; then
+    ERROR "Atleast one value for domain must be passed"
+  fi
+  INFO "SSL Options passed:"
+  INFO "Primary Domain                : ${OPT_PRIMARY_DOMAIN}"
+  INFO "All Domains (incl primary)    : ${OPT_DOMAINS}"
+  INFO "SSL Type                      : ${OPT_SSL_TYPE}"
+  INFO "Certificate File              : ${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN}.crt"
+  INFO "Key File                      : ${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN}.crt"
+  local SRC_CRT_FILE=
+  local SRC_KEY_FILE=
+  local DST_CRT_FILE=${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN}.crt
+  local DST_KEY_FILE=${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN}.key
+  case $OPT_SSL_TYPE in
+    "acme")
+      debug "Generating SSL certificate using ACME for ${OPT_DOMAINS}"
+      # local COMMAND="--issue --stateless -d ${ALL_DOMAINS// /-d }"
+      # debug "command: ${COMMAND}"
+      callAcme --issue --stateless -d ${ALL_DOMAINS// /-d}
+      SRC_CRT_FILE=${ACME_HOME}/${OPT_PRIMARY_DOMAIN}_ecc/fullchain.cer
+      SRC_KEY_FILE=${ACME_HOME}/${OPT_PRIMARY_DOMAIN}_ecc/fullchain.key
+      ;;
+    "self")
+      DEBUG "Generating self signed certificate from ${OPT_DOMAINS}"
+      openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+          -addext "subjectAltName=DNS:${OPT_DOMAINS// /,DNS:}" \
+          -keyout "/tmp/$OPT_PRIMARY_DOMAIN.key" \
+          -out "/tmp/$OPT_PRIMARY_DOMAIN.crt" \
+          -subj "/C=US/ST=Denial/L=Springfield/O=Dis/CN=$OPT_PRIMARY_DOMAIN"
+      SRC_CRT_FILE="/tmp/$OPT_PRIMARY_DOMAIN.crt"
+      SRC_KEY_FILE="/tmp/$OPT_PRIMARY_DOMAIN.key"
+      ;;
+    *)
+      echo "Invalid SSL mode: $MODE"
+      exit 1
+      ;;
+  esac
+  move_certificates $SRC_CRT_FILE $SRC_KEY_FILE $DST_CRT_FILE $DST_KEY_FILE
+  command_reload
+}
+
+command_acme_renew() {
+  callAcme --renew
+  # Copy all files which have changed
+  local BACKUP_DATE=$(date +%Y-%m-%d)
+  for dir in $ACME_CERT_PATH; do
+    if [ -d $DIR ]; then
+      local DOMAIN=${DIR//_ecc/}
+      if ! cmp -s "$file1" "$file2"; then
+        INFO "Certificate for ${DOMAIN} has changed. Migrating"
+        move_certificates $DIR/fullchain.cer $DIR/$DOMAIN.key ${NGINX_CERT_PATH}/$DOMAIN.crt ${NGINX_CERT_PATH}/$DOMAIN.key
+      fi
+    fi
+  done;
+  command_reload
+}
+
+command_acme_remove() {
+  callAcme --remove -d ${OPT_PRIMARY_DOMAIN}
+  rm -f ${ACME_HOME}/${OPT_PRIMARY_DOMAIN}
+  rm -f ${ACME_HOME}/${OPT_PRIMARY_DOMAIN}_ecc
+  # Remove in nginx
+  local BACKUP_DATE=$(date +%Y-%m-%d)
+  mv -f ${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN}.crt ${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN}.crt.$BACKUP_DATE
+  mv -f ${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN}.key ${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN}.key.$BACKUP_DATE
+  # Disable SSL in site config
+  DEBUG "Updating config to enable ssl"
+  sed -i 's|listen 443 ssl;|#listen 443 ssl;|' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
+  sed -i 's|listen \[::\]:443 ssl;|#listen [::]:443 ssl;|' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
+  sed -i 's|ssl_certificate /etc/nginx/certs/$primary_domain/certificate.crt;|#ssl_certificate /etc/nginx/certs/$server_name.crt;|' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
+  sed -i 's|ssl_certificate_key /etc/nginx/certs/$primary_domain/certificate.key;|#ssl_certificate_key /etc/nginx/certs/$server_name.key;|' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
+  sed -i 's|include /etc/nginx/conf.d/ssl-config.conf;|#include /etc/nginx/conf.d/ssl-config.conf;|' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
+  command_reload
 }
 
 # Maxmind GeoIP database management
@@ -705,7 +863,7 @@ command_maxmind_fetch() {
   INFO "EDITION       : ${OPT_MAXMIND_EDITION}"
   INFO "DATABASE      : ${OPT_MAXMIND_DATABASE}"
   INFO "BACKUP        : ${OPT_BACKUP}"
-  INFO "DOWNLOAD URL  : ${DOWNLOAD_URL}"
+  # INFO "DOWNLOAD URL  : ${DOWNLOAD_URL}"
   
   DEBUG "Maxmind - Downloading ${DOWNLOAD_FILE} from ${DOWNLOAD_URL}"
   mkdir -p /tmp/maxmind
@@ -719,7 +877,7 @@ command_maxmind_fetch() {
   DEBUG "Maxmind - Extracted the archive"
   mv /tmp/maxmind/${DOWNLOAD_FILE}.mmdb /tmp/maxmind/maxmind.mmdb
   # Take backup of existing file
-  if [ -f "${MAXMIND_PATH}/maxmind.mmdb" ] && [ ${OPT_BACKUP} == 1 ]; then
+  if [ -f "${MAXMIND_PATH}/maxmind.mmdb" ] && [ "${OPT_BACKUP}" == 1 ]; then
     DEBUG "Maxmind - Backing up existing db file"
     mv "${MAXMIND_PATH}/maxmind.mmdb" "${MAXMIND_PATH}/maxmind-$(date +%Y-%m-%d).mmdb"
     setgroup "${MAXMIND_PATH}/maxmind-$(date +%Y-%m-%d).mmdb"
@@ -731,6 +889,53 @@ command_maxmind_fetch() {
   rm -rf /tmp/maxmind
 }
 
+# NGINX Log Management
+command_consolidate_logs() {
+  local path=${NGINX_LOG_PATH}
+  local dt=$(date -d @$(( $(date +"%s") - 86400)) +"%Y-%m-%d")
+  local file="access-${dt}.log"
+  # Consolidate root level logs
+  INFO "Consolidating root level logs"
+  if [ -f ${path}/access.log ]; then
+    mv -f ${path}/access.log ${path}/access-${dt}.log
+  fi
+  if [ -f ${path}/error.log ]; then
+    mv -f ${path}/error.log ${path}/error-${dt}.log
+  fi
+  if [ -f ${path}/modsec_audit.log ]; then
+    mv -f ${path}/modsec_audit.log ${path}/modsec_audit-${dt}.log
+  fi
+  DEBUG "Consolidating logs in folders (website etc)"
+  for dir in $(find /var/log/nginx -type d); do
+    DEBUG "Checking if access log files are present in ${dir}"
+    if ls ${dir}/access-${dt}@*.log > dev/null 2>&1; then
+      INFO "Consolidating ${dir} logs for date ${dt}"
+      paste -d "\n" ${dir}/access-${dt}@*.log > ${dir}/${file}
+      INFO "Removing consolidated logs"
+      rm -f ${dir}/access-${dt}@*.log
+    fi
+    if [ -f ${dir}/error.log ]; then
+      INFO "Renaming error log files for date ${dt}"
+      mv -f ${dir}/error.log ${dir}/error-${dt}.log
+    fi
+  done
+}
+
+command_purge_logs() {
+  local path=${NGINX_LOG_PATH}
+  local dt=$(date -d @$(( $(date +"%s") - 2592000)) +"%Y-%m-%d")
+  local file="access-${dt}.log"
+  # Purge in root
+  DEBUG "Purging log files in ${path}"
+  rm -f ${path}/access-${dt}.log
+  rm -f ${path}/error-${dt}.log
+  rm -f ${path}/modsec_audit-${dt}.log
+  for dir in $(find /var/log/nginx -type d); do
+    DEBUG "Deleting log files older than 30 days in ${dir}"
+    rm -f ${dir}/access-${dt}*.log
+    rm -f ${dir}/error-${dt}*.log
+  done
+}
 ###############################################################################
 #                                 Main Section                                #
 ###############################################################################
@@ -750,7 +955,7 @@ if ! command -v "command_${COMMAND}" > /dev/null 2>&1; then
 fi
 shift
 
-if ! args="$(getopt -o hs:e:d:o: --long help,server:,email:,domain:,key:,edition:,database:,with-modsecurity,ssl-mode:,debug -n "$ARG0" -- "$@")"; then
+if ! args="$(getopt -o hs:e:d:o: --long help,server:,email:,domain:,key:,edition:,database:,with-modsecurity,enable-stub-status,enable-ping,enable-faveico,ssl-generate,ssl-type:,use-ssl:,debug -n "$ARG0" -- "$@")"; then
   usage
   exit 1
 fi
@@ -773,10 +978,22 @@ while [ "$#" -gt 0 ]; do
       shift
       ;;
     -d | --domain)
+      if [ "${1//\'/}" == "" ]; then
+        ERROR "Domain cannot be empty"
+      fi
+      if [ "${1//\'/}" == "acme" ] || [ "${1//\'/}" == "default" ]; then
+        ERROR "Invalid/Reserved domain name ${1//\'/}"
+      fi
+      # Check if the domain is valid
+      if ! echo "${1//\'/}" | grep -qE '^([a-z0-9]+(-[a-z0-9]+)*\.)+[a-z]{2,}$'; then
+        ERROR "Invalid domain name ${1//\'/}"
+      fi
       if [ -z "${OPT_PRIMARY_DOMAIN}" ]; then
         OPT_PRIMARY_DOMAIN=${1//\'/}
+        OPT_DOMAINS="${1//\'/}"
+      else
+        OPT_DOMAINS="${OPT_DOMAINS} ${1//\'/}"
       fi
-      OPT_DOMAINS="${OPT_DOMAINS} ${1//\'/}"
       shift
       ;;
     --key)
@@ -794,8 +1011,24 @@ while [ "$#" -gt 0 ]; do
     --with-modsecurity)
       OPT_WITH_MODSECURITY=1
       ;;
-    --ssl-mode)
-      OPT_SSL_MODE=$(echo "${1//\'/}" | tr '[:upper:]' '[:lower:]')
+    --enable-stub-status)
+      OPT_ENABLE_STUB_STATUS=1
+      ;;
+    --enable-ping)
+      OPT_ENABLE_PING=1
+      ;;
+    --enable-faveico)
+      OPT_ENABLE_FAVEICO=1
+      ;;
+    --ssl-generate)
+      OPT_SSL_GENERATE=1
+      ;;
+    --ssl-type)
+      OPT_SSL_TYPE=$(echo "${1//\'/}" | tr '[:upper:]' '[:lower:]')
+      shift
+      ;;
+    --use-ssl)
+      OPT_USE_SSL=$(echo "${1//\'/}" | tr '[:upper:]' '[:lower:]')
       shift
       ;;
     --debug)
@@ -811,8 +1044,20 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-if [ "${OPT_SSL_MODE}" != "auto" ] && [ "${OPT_SSL_MODE}" != "acme" ] && [ "${OPT_SSL_MODE}" != "none" ] && [ "${OPT_SSL_MODE}" != "manual" ] && [ "${OPT_SSL_MODE}" != "self" ]; then
-  ERROR "Invalid SSL Mode ${OPT_SSL_MODE}. Allowed values are auto. acme, none, manual and self"
+# if [ "${OPT_SSL_MODE}" != "auto" ] && [ "${OPT_SSL_MODE}" != "acme" ] && [ "${OPT_SSL_MODE}" != "none" ] && [ "${OPT_SSL_MODE}" != "manual" ] && [ "${OPT_SSL_MODE}" != "self" ]; then
+#   ERROR "Invalid SSL Mode ${OPT_SSL_MODE}. Allowed values are auto. acme, none, manual and self"
+# fi
+if [ "${OPT_SSL_TYPE}" != "acme" ] && [ "${OPT_SSL_TYPE}" != "self" ]; then
+  ERROR "SSL Type must be either acme or self."
+fi
+
+if [ "${OPT_USE_SSL}" != "" ]; then
+  # Check if ssl exists for domain
+  if [ ! -f ${NGINX_CERT_PATH}/${OPT_USE_SSL}.crt ] !! [ ! -f ${NGINX_CERT_PATH}/${OPT_USE_SSL}.key ]; then
+    ERROR "Ensure SSL Certificate is present for ${OPT_USE_SSL} in path ${NGINX_CERT_PATH}.\n Also ensure the extension for certificate is .crt and for key is .key"
+  fi
+  # SSL Type will be ignored
+  OPT_SSL_GENERATE=0
 fi
 
 if [ "${OPT_ACME_SERVER}" != "letsencrypt" ] && [ "${OPT_ACME_SERVER}" != "zerossl" ]; then
