@@ -469,8 +469,10 @@ command_add_site() {
   INFO "Ensuring right permissions are present"
   setgroup ${NGINX_WEBROOT_PATH}/${OPT_PRIMARY_DOMAIN}
   setgroup ${NGINX_LOG_PATH}/${OPT_PRIMARY_DOMAIN}
-  if [ "${OPT_USE_SSL}" != "" ]; then
+  if [ "${OPT_USE_SSL}" == "" ]; then
     setgroup ${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN}*
+  else
+    setgroup ${NGINX_CERT_PATH}/${SSL_REPLACE_NAME}*
   fi
   setgroup ${NGINX_CACHE_PATH}/${OPT_PRIMARY_DOMAIN}
   setgroup ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
