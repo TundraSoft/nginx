@@ -13,3 +13,8 @@ add_header X-GEO-CONTINENT-CODE $geoip_continent_code;
 add_header X-GEO-CONTINENT-NAME $geoip_continent_name;
 add_header X-GEO-COUNTRY-CODE   $geoip_country_code;
 add_header X-GEO-COUNTRY-NAME   $geoip_country_name;
+
+proxy_set_header X-GEO-CONTINENT-CODE $geoip_continent_code;
+proxy_set_header X-GEO-CONTINENT-NAME $geoip_continent_name;
+proxy_set_header X-GEO-COUNTRY-CODE   $geoip_country_code;
+proxy_set_header X-GEO-COUNTRY-NAME   $geoip_country_name;

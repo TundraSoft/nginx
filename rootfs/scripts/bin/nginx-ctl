@@ -482,7 +482,7 @@ command_add_site() {
   if [ "${OPT_USE_SSL}" == "" ]; then
     setgroup ${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN}*
   else
-    if [ -f setgroup ${NGINX_CERT_PATH}/${SSL_REPLACE_NAME}* ]; then
+    if [ -f ${NGINX_CERT_PATH}/${SSL_REPLACE_NAME}.crt ]; then
       setgroup ${NGINX_CERT_PATH}/${SSL_REPLACE_NAME}*
     fi
   fi
@@ -791,10 +791,10 @@ command_ssl_generate() {
   local DST_KEY_FILE=${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN}.key
   case $OPT_SSL_TYPE in
     "acme")
-      debug "Generating SSL certificate using ACME for ${OPT_DOMAINS}"
+      DEBUG "Generating SSL certificate using ACME for ${OPT_DOMAINS}"
       # local COMMAND="--issue --stateless -d ${ALL_DOMAINS// /-d }"
       # debug "command: ${COMMAND}"
-      callAcme --issue --stateless -d ${ALL_DOMAINS// /-d}
+      callAcme --issue -d ${OPT_DOMAINS// /-d} --stateless --server ${OPT_ACME_SERVER}
       SRC_CRT_FILE=${ACME_HOME}/${OPT_PRIMARY_DOMAIN}_ecc/fullchain.cer
       SRC_KEY_FILE=${ACME_HOME}/${OPT_PRIMARY_DOMAIN}_ecc/fullchain.key
       ;;
@@ -814,23 +814,30 @@ command_ssl_generate() {
       ;;
   esac
   move_certificates $SRC_CRT_FILE $SRC_KEY_FILE $DST_CRT_FILE $DST_KEY_FILE
-  command_reload
+  # We call reload only if it is called directly. If add site calls this, then do not run
+  if [ "${COMMAND}" == 'ssl-generate' ]; then
+    command_reload
+  fi
 }
 
 command_acme_renew() {
   callAcme --renew
   # Copy all files which have changed
   local BACKUP_DATE=$(date +%Y-%m-%d)
+  local RELOAD=0
   for dir in $ACME_CERT_PATH; do
     if [ -d $DIR ]; then
       local DOMAIN=${DIR//_ecc/}
       if ! cmp -s "$file1" "$file2"; then
         INFO "Certificate for ${DOMAIN} has changed. Migrating"
+        RELOAD=1
         move_certificates $DIR/fullchain.cer $DIR/$DOMAIN.key ${NGINX_CERT_PATH}/$DOMAIN.crt ${NGINX_CERT_PATH}/$DOMAIN.key
       fi
     fi
   done;
-  command_reload
+  if [ $RELOAD -eq 1 ]; then
+    command_reload
+  fi
 }
 
 command_acme_remove() {
@@ -970,7 +977,7 @@ while [ "$#" -gt 0 ]; do
       exit 0
       ;;
     -s | --server)
-      OPT_ACME_SERVER=$1
+      OPT_ACME_SERVER=${1//\'/}
       shift
       ;;
     -e | --email)

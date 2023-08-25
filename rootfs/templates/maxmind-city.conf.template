@@ -27,3 +27,15 @@ add_header X-GEO-CITY-NAME      $geoip_city_name;
 add_header X-GEO-LATITUDE       $geoip_lat;
 add_header X-GEO-LONGITUDE      $geoip_long;
 add_header X-GEO-LATLONG-RADIUS $geoip_latlong_radius;
+
+proxy_set_header X-GEO-CONTINENT-CODE $geoip_continent_code;
+proxy_set_header X-GEO-CONTINENT-NAME $geoip_continent_name;
+proxy_set_header X-GEO-COUNTRY-CODE   $geoip_country_code;
+proxy_set_header X-GEO-COUNTRY-NAME   $geoip_country_name;
+proxy_set_header X-GEO-TIMEZONE       $geoip_timezone;
+proxy_set_header X-GEO-STATE-CODE     $geoip_state_code;
+proxy_set_header X-GEO-STATE-NAME     $geoip_state_name;
+proxy_set_header X-GEO-CITY-NAME      $geoip_city_name;
+proxy_set_header X-GEO-LATITUDE       $geoip_lat;
+proxy_set_header X-GEO-LONGITUDE      $geoip_long;
+proxy_set_header X-GEO-LATLONG-RADIUS $geoip_latlong_radius;
