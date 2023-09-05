@@ -6,7 +6,9 @@
 #  jdomain api.core port=8008 max_ips=8 interval=10;
 #}
 
-# proxy_cache_path ${NGINX_CACHE_PATH}/$PRIMARY_DOMAIN levels=1:2 keys_zone=$PRIMARY_DOMAIN:10m;
+#proxy_cache_path ${NGINX_CACHE_PATH}/$PRIMARY_DOMAIN levels=1:2 keys_zone=$PRIMARY_DOMAIN:10m;
+#limit_req_zone $binary_remote_addr zone=limit_${PRIMARY_DOMAIN}:10m rate=10r/s;
+#limit_req_status 429;
 
 server {
   ##################################################
@@ -14,17 +16,27 @@ server {
   # name, example:
   # server_name google.com www.google.com;
   ##################################################
-  set $primary_domain $PRIMARY_DOMAIN;
-  set $upstream_name upstream_${PRIMARY_DOMAIN};
-  server_name $ALL_DOMAINS;
-  listen 80;
-  listen [::]:80;
+  set $primary_domain             $PRIMARY_DOMAIN;
+  set $upstream_name              upstream_${PRIMARY_DOMAIN};
+  server_name                     $ALL_DOMAINS;
+  listen                          80;
+  listen                          [::]:80;
 
-  #listen 443 ssl;
-  #listen [::]:443 ssl;
-  #ssl_certificate /etc/nginx/certs/$server_name.crt;
-  #ssl_certificate_key /etc/nginx/certs/$server_name.key;
-  #include /etc/nginx/conf.d/ssl-config.conf;
+  #listen                         443 ssl;
+  #listen                         [::]:443 ssl;
+  #ssl_certificate                /etc/nginx/certs/$server_name.crt;
+  #ssl_certificate_key            /etc/nginx/certs/$server_name.key;
+  #add_header Strict-Transport-Security "max-age=63072000; includeSubdomains; preload" always;
+  #ssl_stapling                   on;
+  #ssl_stapling_verify            on;
+  #ssl_trusted_certificate        /etc/nginx/certs/$server_name_ca.crt;
+  
+  ###################################################
+  # HTTP -> HTTPS redirect
+  ###################################################
+  #if ($scheme = http) {
+    #return 301 https://$server_name$request_uri;
+  #}
   include /etc/nginx/conf.d/default-security-headers.conf;
 
   access_log                      /var/log/nginx/$server_name/access-$log_date.log  main;
@@ -71,6 +83,11 @@ server {
       return 404;
   }
 
+  # Cache static files
+  location ~* \.(jpg|jpeg|png|gif|ico|css|js|svg|otf|mp4|ogg|webm)$ {
+    expires 7d;
+  }
+
   # set default locations. Comment them if you do not want to use them
   include /etc/nginx/conf.d/fancy-index-flat.conf;
   #include /etc/nginx/conf.d/default-location-healthz.conf;
@@ -83,6 +100,8 @@ server {
     root /app/$server_name;
     index index.html index.htm;
     try_files \$uri \$uri/ =404;
+    # Sets rate limit, burst - Upto x req/s burts mode and delay is cause a delay after the x requests
+    #limit_req zone=limit_${PRIMARY_DOMAIN} burst=20 delay=15; # nodelay if delay need not be set
     #proxy_pass http://$upstream_name;
   }
 }
