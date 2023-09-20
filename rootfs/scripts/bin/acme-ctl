@@ -1,0 +1,361 @@
+#!/bin/sh
+LOCKFILE=/var/log/nginx/acme-ctl.lock
+
+source /scripts/nginx-ctl-config.sh
+
+# Some default helper functions
+print_message() {
+  local message_type=$1
+  local message=$2
+  local color_code
+  local dt=$(date --utc +%FT%TZ)
+  local host=$(hostname)
+  case $message_type in
+  ERROR) color_code='\033[0;31m' ;;
+  WARN) color_code='\033[0;33m' ;;
+  DEBUG) color_code='\033[1;32m' ;;
+  INFO) color_code='\033[0;36m' ;;
+  esac
+
+  printf "[${dt}@${host}]${color_code}[${message_type}]: ${message}\033[0m\n"
+}
+
+ERROR() {
+  print_message "ERROR" "$1"
+  cleanup
+  exit 1
+}
+
+WARN() {
+  print_message "WARN" "$1"
+}
+
+DEBUG() {
+  [ "$DEBUG_MODE" = 1 ] && print_message "DEBUG" "$1"
+}
+
+INFO() {
+  print_message "INFO" "$1"
+}
+
+init() {
+  if [ "${COMMAND}" != 'reload' ]; then
+    if [ -f ${LOCKFILE} ]; then
+      INFO "There is already an instance of this script running. Exiting..."
+      exit 1
+    fi
+    touch ${LOCKFILE}
+  fi
+}
+
+cleanup() {
+  if [ -f ${LOCKFILE} ]; then
+    rm -f ${LOCKFILE}
+  fi
+}
+
+# The main functions
+OPT_FORCE=0
+OPT_DEBUG=1
+OPT_PRIMARY_DOMAIN=
+OPT_DOMAINS=
+
+usage() {
+  echo "Usage: ${0} COMMAND [OPTIONS]"
+  echo
+  echo "Script to manage NGINX configuration"
+  echo
+  echo "Commands:"
+  echo
+  echo "-------------------------------------------------------------------------------"
+  echo "-                                    SSL                                      -"
+  echo "-------------------------------------------------------------------------------"
+  echo
+  echo "  acme-register"
+  echo "    Options:"
+  echo "      -e, --email <EMAIL>                     The email address to be used for registration"
+  echo "      -s, --server <SERVER>                   The server with which to register, default is letsencrypt"
+  echo
+  echo "  generate                                    Generate SSL certificate"
+  echo "    Options:"
+  echo "      -d, --domain <TLD>                      The domain for which to create the SSL. If multiple domains are specified, then the first domain will be used as the primary domain"
+  echo "          --ssl-type <TYPE>                   Can be self or acme. Defaults to acme"
+  echo "          --server <SERVER>                   The server with which to register, default is letsencrypt. Required for ACME type"
+  echo
+  echo "  acme-renew                                  Renew certificate. If domain is not specified, then all certificates will be renewed"
+  echo "    Options:"
+  echo "      -d, --domain <TLD>                      The domain to renew. Do not pass this argument to renew all."
+  echo 
+  echo "Options:"
+  echo "  -h, --help                                  Show this help message and exit"
+  echo "  -c, --config <FILE>                         The configuration file to use"
+  echo "      --debug                                 Enable debug messages to be displayed"
+  echo "      --force                                 Force the operation to be performed"
+  echo
+}
+
+command_initialize() {
+  if [ ! -z ${OPT_ACME_EMAIL} ]; then
+    command_register
+  fi
+}
+
+callAcme() {
+  ${ACME_HOME}/acme.sh --home ${ACME_HOME} --config-home ${ACME_HOME} "$@"
+  return $?
+}
+
+command_register(){
+  DEBUG "In ACME Register"
+  if [ -f ${ACME_HOME}/thumbprint.conf ]; then
+    OPT_ACME_THUMBPRINT=$(cat ${ACME_HOME}/thumbprint.conf)
+    INFO "ACME already registered with thumbprint ${OPT_ACME_THUMBPRINT}"
+    exit 0;
+  fi
+  if [ ! -z ${OPT_ACME_EMAIL} ];
+  then
+    INFO "Registering with ACME..."
+    INFO "SERVER      : ${OPT_ACME_SERVER}"
+    INFO "EMAIL       : ${OPT_ACME_EMAIL}"
+    output=$(callAcme --register-account --server ${OPT_ACME_SERVER} -m ${OPT_ACME_EMAIL})
+    # Extract the value of ACCOUNT_THUMBPRINT from the output using grep and awk
+    OPT_ACME_THUMBPRINT=$(echo "$output" | grep "ACCOUNT_THUMBPRINT" | awk -F "'" '{print $2}')
+    if [ "$OPT_ACME_THUMBPRINT}" = "" ]; then
+      DEBUG "ACME Register - Error fetching thumbprint"
+      DEBUG "ACME Register - Output: ${output}"
+      ERROR "Registration failed for email ${OPT_ACME_EMAIL} in ${OPT_ACME_SERVER}!"
+    fi
+    DEBUG "Registered ACME Account with email ${OPT_ACME_EMAIL} and server ${OPT_ACME_SERVER}. Received thumbprint - ${OPT_ACME_THUMBPRINT}"
+    # Save the thumbprint for future use
+    echo "OPT_ACME_THUMBPRINT=${OPT_ACME_THUMBPRINT}" > ${ACME_HOME}/thumbprint.conf
+    INFO "Registration complete"
+  else
+    ERROR "Email id is required for registration"
+  fi
+}
+
+move_certificates() {
+  local SRC_CRT_FILE=$1
+  local SRC_KEY_FILE=$2
+  local SRC_CA_FILE=$3
+  local DOMAIN=$4
+  local DST_PATH=${NGINX_CERT_PATH}
+  # local DST_CRT_FILE=$3
+  # local DST_KEY_FILE=$4
+  DEBUG "Moving certificate and key files"
+  DEBUG "SOURCE CERTIFICATE               : ${SRC_CRT_FILE}"
+  DEBUG "SOURCE KEY                       : ${SRC_KEY_FILE}"
+  if [ -z "${SRC_CA_FILE}" ]; then
+    DEBUG "SOURCE CA                        : Not available"
+  else
+    DEBUG "SOURCE CA                        : ${SRC_CA_FILE}"
+  fi
+  DEBUG "DOMAIN                           : ${DST_CRT_FILE}"
+  # Check if cert already exists if so backup and move
+  if [ -f ${DST_PATH}/${DOMAIN}.crt ]; then
+    DEBUG "Backing up old certificate"
+    mv ${DST_PATH}/${DOMAIN}.crt ${DST_PATH}/${DOMAIN}.crt.$(date +%Y-%m-%d)
+  fi
+  if [ -f ${DST_PATH}/${DOMAIN}.pem ]; then
+  DEBUG "Backing up old key"
+    mv ${DST_PATH}/${DOMAIN}.pem ${DST_PATH}/${DOMAIN}.pem.$(date +%Y-%m-%d)
+  fi
+  if [ -f ${DST_PATH}/${DOMAIN}_ca.crt ]; then
+    DEBUG "Backing old CA certificate"
+    mv ${DST_PATH}/${DOMAIN}_ca.key ${DST_PATH}/${DOMAIN}_ca.key.$(date +%Y-%m-%d)
+  fi
+  # Move
+  DEBUG "Moving certificate & key"
+  cp -f $SRC_CRT_FILE ${DST_PATH}/${DOMAIN}.crt
+  cp -f $SRC_KEY_FILE ${DST_PATH}/${DOMAIN}.pem
+  if [ ! -z "${SRC_CA_FILE}" ]; then
+    cp -f $SRC_CA_FILE ${DST_PATH}/${DOMAIN}_ca.crt
+  fi
+  # Permissions
+  DEBUG "Setting permissions"
+  setgroup $DST_CRT_FILE $DST_KEY_FILE
+  if [ ! -z "${SRC_CA_FILE}" ]; then
+    setgroup ${DST_PATH}/${DOMAIN}_ca.crt
+  fi
+}
+
+command_generate_old() {
+  if [ "${OPT_PRIMARY_DOMAIN}" == "" ]; then
+    ERROR "Atleast one value for domain must be passed"
+  fi
+  INFO "SSL Options passed:"
+  INFO "Primary Domain                : ${OPT_PRIMARY_DOMAIN}"
+  INFO "All Domains (incl primary)    : ${OPT_DOMAINS}"
+  INFO "SSL Type                      : ${OPT_SSL_TYPE}"
+  INFO "Certificate File              : ${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN}.crt"
+  INFO "Key File                      : ${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN}.crt"
+  local SRC_CRT_FILE=
+  local SRC_KEY_FILE=
+  local DST_CRT_FILE=${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN}.crt
+  local DST_KEY_FILE=${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN}.key
+  case $OPT_SSL_TYPE in
+    "acme")
+      DEBUG "Generating SSL certificate using ACME for ${OPT_DOMAINS}"
+      # local COMMAND="--issue --stateless -d ${ALL_DOMAINS// /-d }"
+      # debug "command: ${COMMAND}"
+      callAcme --issue -d ${OPT_DOMAINS// /-d} --stateless --server ${OPT_ACME_SERVER}
+      SRC_CRT_FILE=${ACME_HOME}/${OPT_PRIMARY_DOMAIN}_ecc/fullchain.cer
+      SRC_KEY_FILE=${ACME_HOME}/${OPT_PRIMARY_DOMAIN}_ecc/${OPT_PRIMARY_DOMAIN}.key
+      SRC_CA_FILE=${ACME_HOME}/${OPT_PRIMARY_DOMAIN}_ecc/ca.cer
+      ;;
+    "self")
+      DEBUG "Generating self signed certificate from ${OPT_DOMAINS}"
+      openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+          -addext "subjectAltName=DNS:${OPT_DOMAINS// /,DNS:}" \
+          -keyout "/tmp/$OPT_PRIMARY_DOMAIN.key" \
+          -out "/tmp/$OPT_PRIMARY_DOMAIN.crt" \
+          -subj "/C=US/ST=Denial/L=Springfield/O=Dis/CN=$OPT_PRIMARY_DOMAIN"
+      SRC_CRT_FILE="/tmp/$OPT_PRIMARY_DOMAIN.crt"
+      SRC_KEY_FILE="/tmp/$OPT_PRIMARY_DOMAIN.key"
+      ;;
+    *)
+      echo "Invalid SSL mode: $MODE"
+      exit 1
+      ;;
+  esac
+  move_certificates $SRC_CRT_FILE $SRC_KEY_FILE $SRC_CA_FILE $OPT_PRIMARY_DOMAIN
+  # We call reload only if it is called directly. If add site calls this, then do not run
+  if [ "${COMMAND}" == 'ssl-generate' ]; then
+    command_reload
+  fi
+}
+
+command_generate() {
+  if [ "${OPT_PRIMARY_DOMAIN}" == "" ]; then
+    ERROR "Atleast one value for domain must be passed"
+  fi
+  INFO "SSL Options passed:"
+  INFO "Primary Domain                : ${OPT_PRIMARY_DOMAIN}"
+  INFO "All Domains (incl primary)    : ${OPT_DOMAINS}"
+  INFO "Certificate File              : ${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN}.crt"
+  INFO "Key File                      : ${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN}.crt"
+  local SRC_CRT_FILE=
+  local SRC_KEY_FILE=
+  local SRC_CA_FILE=
+  DEBUG "Generating SSL certificate using ACME for ${OPT_DOMAINS}"
+  # local COMMAND="--issue --stateless -d ${ALL_DOMAINS// /-d }"
+  # debug "command: ${COMMAND}"
+  callAcme --issue -d ${OPT_DOMAINS// /-d} --stateless --server ${OPT_ACME_SERVER}
+  SRC_CRT_FILE=${ACME_HOME}/${OPT_PRIMARY_DOMAIN}_ecc/fullchain.cer
+  SRC_KEY_FILE=${ACME_HOME}/${OPT_PRIMARY_DOMAIN}_ecc/${OPT_PRIMARY_DOMAIN}.key
+  SRC_CA_FILE=${ACME_HOME}/${OPT_PRIMARY_DOMAIN}_ecc/ca.cer
+  move_certificates $SRC_CRT_FILE $SRC_KEY_FILE $SRC_CA_FILE $OPT_PRIMARY_DOMAIN
+}
+
+command_renew() {
+  callAcme --renew
+  # Copy all files which have changed
+  local BACKUP_DATE=$(date +%Y-%m-%d)
+  local RELOAD=0
+  for dir in $ACME_HOME; do
+    if [ -d $DIR ]; then
+      local DOMAIN=${DIR//_ecc/}
+      local file1=$DIR/fullchain.cer
+      local file2=${NGINX_CERT_PATH}/$DOMAIN.crt
+      if ! cmp -s "$file1" "$file2"; then
+        INFO "Certificate for ${DOMAIN} has changed. Migrating"
+        RELOAD=1
+        move_certificates $DIR/fullchain.cer $DIR/$DOMAIN.key $DIR/ca.cer $DOMAIN
+      fi
+    fi
+  done;
+}
+
+command_remove() {
+  callAcme --remove -d ${OPT_PRIMARY_DOMAIN}
+  rm -f ${ACME_HOME}/${OPT_PRIMARY_DOMAIN}
+  rm -f ${ACME_HOME}/${OPT_PRIMARY_DOMAIN}_ecc
+  # Remove in nginx
+  local BACKUP_DATE=$(date +%Y-%m-%d)
+  mv -f ${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN}.crt ${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN}.crt.$BACKUP_DATE
+  mv -f ${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN}.key ${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN}.key.$BACKUP_DATE
+  mv -f ${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN}_ca.crt ${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN}_ca.crt.$BACKUP_DATE
+  # Disable SSL in site config
+  DEBUG "Updating config to disable ssl"
+}
+
+
+###############################################################################
+#                                 Main Section                                #
+###############################################################################
+if [ $# -eq 0 ]; then
+  usage
+  exit 1;
+fi
+
+COMMAND="${1:-}"
+COMMAND="${COMMAND//-/_}"
+if [ -z "$COMMAND" ]; then
+  ERROR "No command was specified. Run with --help to see the usage. Maybe you want to run \`$ARG0 issue\`?"
+fi
+
+if ! command -v "command_${COMMAND}" > /dev/null 2>&1; then
+  ERROR "Unknown command: ${COMMAND}. Run with --help to see the usage."
+fi
+shift
+
+if ! args="$(getopt -o hs:e:d: --long help,domain:,server:,email:,debug,force -n "$ARG0" -- "$@")"; then
+  usage
+  exit 1
+fi
+
+set -- $args
+while [ "$#" -gt 0 ]; do
+  arg="$1"
+  shift
+  case "$arg" in
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    -d | --domain)
+      if [ "${1//\'/}" == "" ]; then
+        ERROR "Domain cannot be empty"
+      fi
+      if [ "${1//\'/}" == "acme" ] || [ "${1//\'/}" == "default" ]; then
+        ERROR "Invalid/Reserved domain name ${1//\'/}"
+      fi
+      # Check if the domain is valid
+      if ! echo "${1//\'/}" | grep -qE '^([a-z0-9]+(-[a-z0-9]+)*\.)+[a-z]{2,}$'; then
+        ERROR "Invalid domain name ${1//\'/}"
+      fi
+      if [ -z "${OPT_PRIMARY_DOMAIN}" ]; then
+        OPT_PRIMARY_DOMAIN=${1//\'/}
+        OPT_DOMAINS="${1//\'/}"
+      else
+        OPT_DOMAINS="${OPT_DOMAINS} ${1//\'/}"
+      fi
+      shift
+      ;;
+    -s | --server)
+      OPT_ACME_SERVER="${1//\'/}"
+      shift
+      ;;
+    -e | --email)
+      OPT_ACME_EMAIL="${1//\'/}"
+      shift
+      ;;
+    --debug)
+      DEBUG_MODE=1
+      ;;
+    --force)
+      OPT_FORCE=1
+      ;;
+    --)
+      break
+      ;;
+    *)
+      ERROR "Unknown argument '$arg' when parsing script arguments."
+      exit 1
+      ;;
+  esac
+done
+
+init
+"command_${COMMAND}" && cleanup
+cleanup

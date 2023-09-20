@@ -2,11 +2,12 @@
 #  least_conn;
 #  keepalive 128;
 #  zone ${PRIMARY_DOMAIN}_upstream 1m;
-#  server serv1:1234 fail_timeout=10s max_fails=3 weight=5;
-#  jdomain api.core port=8008 max_ips=8 interval=10;
+#  server serv1:1234 fail_timeout=10s max_fails=3 weight=5 backup down;
+#  jdomain upstream.domain port=8008 max_ips=8 interval=10;
 #}
 
 #proxy_cache_path ${NGINX_CACHE_PATH}/$PRIMARY_DOMAIN levels=1:2 keys_zone=$PRIMARY_DOMAIN:10m;
+#proxy_cache_methods GET HEAD;
 #limit_req_zone $binary_remote_addr zone=limit_${PRIMARY_DOMAIN}:10m rate=10r/s;
 #limit_req_status 429;
 
@@ -26,24 +27,17 @@ server {
   #listen                         [::]:443 ssl;
   #ssl_certificate                /etc/nginx/certs/$server_name.crt;
   #ssl_certificate_key            /etc/nginx/certs/$server_name.key;
-  #add_header Strict-Transport-Security "max-age=63072000; includeSubdomains; preload" always;
   #ssl_stapling                   on;
   #ssl_stapling_verify            on;
   #ssl_trusted_certificate        /etc/nginx/certs/$server_name_ca.crt;
+  #add_header Strict-Transport-Security "max-age=63072000; includeSubdomains; preload" always;
+  #include /etc/nginx/conf.d/https-redirect.conf;
   
-  ###################################################
-  # HTTP -> HTTPS redirect
-  ###################################################
-  #if ($scheme = http) {
-    #return 301 https://$server_name$request_uri;
-  #}
-  include /etc/nginx/conf.d/default-security-headers.conf;
-
   access_log                      /var/log/nginx/$server_name/access-$log_date.log  main;
   error_log                       /var/log/nginx/$PRIMARY_DOMAIN/error.log;
-  root                            /app/$server_name;
-  
-  include /etc/nginx/conf.d/default-vts.conf;
+  root                            /webroot/$server_name;
+
+  # Few redirects
   ###################################################
   # www -> no www redirect
   ###################################################
@@ -51,13 +45,19 @@ server {
   #   return 301 https://$primary_domain$request_uri;
   #}
 
-  # Proxy Settings
+  ###################################################
+  # Include few items
+  ###################################################
+  include /etc/nginx/conf.d/default-security-headers.conf;
+  include /etc/nginx/conf.d/default-vts.conf;
   include /etc/nginx/conf.d/default-proxy.conf;
-  
-  ########################################
-  # Extras
-  ########################################
-  #include /etc/nginx/conf.d/default-modsecurity.conf;
+  #proxy_cache $PRIMARY_DOMAIN;
+
+  ###################################################
+  # Mod Security
+  ###################################################
+  modsecurity off;
+  modsecurity_rules_file /etc/nginx/conf.d/modsecurity/modsecurity-includes.conf;
 
   ########################################
   # Serve
@@ -65,12 +65,12 @@ server {
   # Error pages
   error_page 500 502 503 504  /50x.html;
   location = /50x.html {
-    root /app/default/;
+    root /webroot/default/;
   }
 
   error_page 404 /404.html;
   location = /404.html {
-    root /app/default/;
+    root /webroot/default/;
   }
   
   # Deny all attempts to access hidden files
@@ -92,16 +92,19 @@ server {
   include /etc/nginx/conf.d/fancy-index-flat.conf;
   #include /etc/nginx/conf.d/default-location-healthz.conf;
   #include /etc/nginx/conf.d/default-location-ping.conf;
-  #include /etc/nginx/conf.d/default-location-faveico.conf;
+  #include /etc/nginx/conf.d/default-location-faveicon.conf;
   
   # Add Any other routes here
   
   location / {
-    root /app/$server_name;
+    root /webroot/$server_name;
     index index.html index.htm;
     try_files \$uri \$uri/ =404;
     # Sets rate limit, burst - Upto x req/s burts mode and delay is cause a delay after the x requests
     #limit_req zone=limit_${PRIMARY_DOMAIN} burst=20 delay=15; # nodelay if delay need not be set
     #proxy_pass http://$upstream_name;
+    # Caching
+    #proxy_cache_valid    any  3m;
+    #proxy_cache_min_uses 3;
   }
 }

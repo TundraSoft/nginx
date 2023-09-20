@@ -238,7 +238,7 @@ RUN set -eux; \
     wget https://raw.githubusercontent.com/acmesh-official/acme.sh/master/acme.sh -O acme.sh; \
     chmod +x acme.sh; \
     ./acme.sh --install \
-      --home /app/acme \
+      --home /acme \
       --log /var/log/nginx/acme.log; \
     rm -rf /tmp/*; \
     rm -rf /etc/nginx;
@@ -258,8 +258,8 @@ RUN mv /etc/nginx/conf.d/modsecurity/owasp/crs-setup.conf /templates/crs-setup.c
     ln -s /usr/local/modsecurity/lib/libmodsecurity.so.${MOD_SECURITY_VERSION} /usr/local/modsecurity/lib/libmodsecurity.so; \
     setgroup ${NGINX_PREFIX} ${NGINX_CONF_PATH} /var/log/nginx;
 
-# /etc/nginx is Config /app is the webroot /var/log/nginx is the log path
-VOLUME [ "/etc/nginx", "/app", "/var/log/nginx" ]
+# /etc/nginx is Config /webroot is the webroot /var/log/nginx is the log path, /acme is for acme certificates
+VOLUME [ "/etc/nginx", "/webroot", "/var/log/nginx", "/acme" ]
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s CMD /usr/bin/healthcheck.sh
 
