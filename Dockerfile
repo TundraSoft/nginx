@@ -259,7 +259,7 @@ RUN mv /etc/nginx/conf.d/modsecurity/owasp/crs-setup.conf /templates/crs-setup.c
     setgroup ${NGINX_PREFIX} ${NGINX_CONF_PATH} /var/log/nginx;
 
 # /etc/nginx is Config /webroot is the webroot /var/log/nginx is the log path, /acme is for acme certificates
-VOLUME [ "/etc/nginx", "/webroot", "/var/log/nginx", "/acme" ]
+# VOLUME [ "/etc/nginx", "/webroot", "/var/log/nginx", "/acme" ]
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s CMD /usr/bin/healthcheck.sh
 
