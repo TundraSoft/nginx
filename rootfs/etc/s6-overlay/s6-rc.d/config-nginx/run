@@ -5,7 +5,7 @@ if [ -f /var/log/nginx/nginx-ctl.lock ]; then
   while [ -f /var/log/nginx/nginx-ctl.lock ]; do
     sleep 10
   done
-  echo "The task is complete. We run permission check for safety"
+  echo "Configuration completed. Continuing"
   nginx-ctl initialize
 else
   nginx-ctl configure
