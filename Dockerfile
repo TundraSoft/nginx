@@ -119,7 +119,7 @@ RUN set -eux; \
 # Final Build
 FROM tundrasoft/alpine:${ALPINE_VERSION}
 
-LABEL maintainer="Abhinav A V <abhai2k@gmail.com>"
+LABEL maintainer="Abhinav A V <36784+abhai2k@users.noreply.github.com>"
 
 ARG ALPINE_VERSION \
     CRS_VERSION \
