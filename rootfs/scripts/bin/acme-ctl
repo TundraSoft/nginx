@@ -110,6 +110,7 @@ command_register(){
   if [ -f ${ACME_HOME}/thumbprint.conf ]; then
     OPT_ACME_THUMBPRINT=$(cat ${ACME_HOME}/thumbprint.conf)
     INFO "ACME already registered with thumbprint ${OPT_ACME_THUMBPRINT}"
+    cleanup
     exit 0;
   fi
   if [ ! -z ${OPT_ACME_EMAIL} ];
@@ -215,6 +216,7 @@ command_generate_old() {
       ;;
     *)
       echo "Invalid SSL mode: $MODE"
+      cleanup
       exit 1
       ;;
   esac
