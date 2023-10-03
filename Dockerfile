@@ -202,13 +202,13 @@ RUN set -eux; \
         pcre \
         pcre2 \
         sed \
-        yajl; \
-    apk add --no-cache --virtual .build-deps \
-        build-base \
+        yajl  \
         curl-dev \
         libxml2-dev \
         openssl-dev \
         pcre-dev; \
+    apk add --no-cache --virtual .build-deps \
+        build-base; \
     cd /tmp; \
     wget https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz -O nginx-${NGINX_VERSION}.tar.gz; \
     tar -xzf nginx-${NGINX_VERSION}.tar.gz; \
