@@ -1,12 +1,102 @@
 #!/command/with-contenv sh
-if [ -f /var/log/nginx/nginx-ctl.lock ]; then
-  echo "There is already a process running. Waiting for that to complete"
-  # Waut for configuration to finish
+# if [ -f /var/log/nginx/nginx-ctl.lock ]; then
+#   echo "There is already a process running. Waiting for that to complete"
+#   # Waut for configuration to finish
+#   while [ -f /var/log/nginx/nginx-ctl.lock ]; do
+#     sleep 10
+#   done
+#   echo "Configuration completed. Continuing"
+#   nginx-ctl initialize
+# else
+#   nginx-ctl configure
+# fi
+# Variables
+DEFAULT_CONFIGS_PATH="/configs/defaults"
+NGINX_CONF_PATH="/etc/nginx"
+NGINX_LOG_PATH="/var/log/nginx"
+NGINX_CACHE_PATH="/var/cache/nginx"
+NGINX_MODULES_PATH="/usr/local/nginx/modules"
+NGINX_WEBROOT_PATH=/webroot
+
+NGINX_WHITELIST_IPS=${NGINX_WHITELIST_IP:-}
+if [[ "${NGINX_WHITELIST_IP}" = "/run/secrets/*" ]] && [ -f "${NGINX_WHITELIST_IP}" ]; then
+  NGINX_WHITELIST_IPS=$(cat ${NGINX_WHITELIST_IP})
+fi
+
+MODSEC_AUDIT_STORAGE=/tmp/modsecurity
+
+SSL_KEY_LENGTH=${SSL_KEY_LENGTH:-4096}
+
+# We keep the lock file in config incase its not a volume!
+LOCKFILE=${NGINX_CONF_PATH}/nginx-init.lock
+
+if [ -e "${LOCKFILE}" ] && kill -0 `cat "${LOCKFILE}"`; then
+  echo "Another container in this cluster has started configuring nginx. Waiting for that to complete"
   while [ -f /var/log/nginx/nginx-ctl.lock ]; do
     sleep 10
   done
   echo "Configuration completed. Continuing"
-  nginx-ctl initialize
 else
-  nginx-ctl configure
+  trap "rm -f ${LOCKFILE}; exit" INT TERM EXIT
+  echo $$ > "${LOCKFILE}"
+  # Configure nginx
+  
+  # Generate modules
+  if [ -f ${NGINX_MODULES_PATH}/ngx_stream_module.so ]; then
+    echo "load_module ${NGINX_MODULES_PATH}/ngx_stream_module.so;" >> "${DEFAULT_CONFIGS_PATH}/modules.conf"
+  fi
+  for file in ${NGINX_MODULES_PATH}/*.so; do
+    if [ "$file" != "${NGINX_MODULES_PATH}/ngx_stream_module.so" ]; then
+      echo "load_module ${file};" >> "${DEFAULT_CONFIGS_PATH}/modules.conf"
+    fi
+  done
+
+  # Generate dhparams
+  if [ ! -f $NGINX_CONF_PATH/dhparam.pem ]; then
+    openssl dhparam -out $NGINX_CONF_PATH/dhparam.pem ${SSL_KEY_LENGTH}
+  fi
+  
+  # Generate whitelist
+  local WHITELIST_FILE="${DEFAULT_CONFIGS_PATH}/whitelist.conf"
+  if [ ! -z "${NGINX_WHITELIST_IPS}" ]; then
+    # NGINX_WHITELIST_IPS is a comma seperated list of IP addresses, loop and add
+    for ip in $(echo ${NGINX_WHITELIST_IPS} | sed "s/,/ /g"); do
+      echo "allow ${ip};" >> "${WHITELIST_FILE}"
+    done
+  fi
+
+  # Generate maxmind
+  if [ ! -z "${MAXMIND_LICENSE_KEY}" ]; then
+    echo "geoip2 /etc/nginx/geoip2.conf {" >> "${DEFAULT_CONFIGS_PATH}/maxmind.conf"
+    echo "  country /usr/share/GeoIP/GeoIP2-Country.mmdb {" >> "${DEFAULT_CONFIGS_PATH}/maxmind.conf"
+    echo "    \$geoip2_metadata_country_build metadata build_epoch;" >> "${DEFAULT_CONFIGS_PATH}/maxmind.conf"
+    echo "    \$geoip2_data_country_code country iso_code;" >> "${DEFAULT_CONFIGS_PATH}/maxmind.conf"
+    echo "    \$geoip2_data_country_name country names en;" >> "${DEFAULT_CONFIGS_PATH}/maxmind.conf"
+    echo "  }" >> "${DEFAULT_CONFIGS_PATH}/maxmind.conf"
+    echo "  city /usr/share/GeoIP/GeoIP2-City.mmdb {" >> "${DEFAULT_CONFIGS_PATH}/maxmind.conf"
+    echo "    \$geoip2_data_city_name city names en;" >> "${DEFAULT_CONFIGS_PATH}/maxmind.conf"
+    echo "    \$geoip2_data_city_geonameid city geoname_id;" >> "${DEFAULT_CONFIGS_PATH}/maxmind.conf"
+    echo "    \$geoip2_data_city_postal_code city postal_code;" >> "${DEFAULT_CONFIGS_PATH}/maxmind.conf"
+    echo "    \$geoip2_data_city_latitude city location latitude;" >> "${DEFAULT_CONFIGS_PATH}/maxmind.conf"
+    echo "    \$geoip2_data_city_longitude city location longitude;" >> "${DEFAULT_CONFIGS_PATH}/maxmind.conf"
+    echo "  }" >> "${DEFAULT_CONFIGS_PATH}/maxmind.conf"
+    echo "  asn /usr/share/GeoIP/GeoIP2-ISP.mmdb {" >> "${DEFAULT_CONFIGS_PATH}/maxmind.conf"
+    echo "    \$geoip2_data_asn_number asn autonomous_system_number;" >> "${DEFAULT_CONFIGS_PATH}/maxmind.conf"
+    echo "    \$geoip2_data_asn_organization asn autonomous_system_organization;" >> "${DEFAULT_CONFIGS_PATH}/maxmind.conf"
+    echo "  }" >> "${DEFAULT_CONFIGS_PATH}/maxmind.conf"
+    echo "}" >> "${DEFAULT_CONFIGS_PATH}/maxmind.conf"
+  fi
+  # Generate modsecurity
+
+  
+  rm -f "${LOCKFILE}"
+  trap - INT TERM EXIT
 fi
+
+# Set the permissions to the directories. We do this in the end so that any generated files also have correct permissions
+for dir in $NGINX_LOG_PATH $NGINX_CACHE_PATH $NGINX_WEBROOT_PATH $MODSEC_AUDIT_STORAGE $DEFAULT_CONFIGS_PATH; do
+  if [ ! -d $dir ]; then
+    mkdir -p $dir
+  fi
+  setgroup $dir
+done

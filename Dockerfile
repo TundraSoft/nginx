@@ -158,7 +158,7 @@ ENV ACME_EMAIL=\
     CRS_REPORTING_LEVEL=2\
     MAXMIND_DATABASE="city" \
     MAXMIND_EDITION="GeoLite2" \
-    MAXMIND_KEY=\
+    MAXMIND_LICENSE_KEY=\
     MAXMIND_REFRESH='0 0 * * *' \
     MODSEC_AUDIT_ENGINE="RelevantOnly" \
     MODSEC_AUDIT_LOG_FORMAT=JSON \
@@ -202,12 +202,13 @@ RUN set -eux; \
         pcre \
         pcre2 \
         sed \
-        yajl  \
+        yajl \
+        coreutils; \
+    apk add --no-cache --virtual .build-deps \
         curl-dev \
         libxml2-dev \
         openssl-dev \
-        pcre-dev; \
-    apk add --no-cache --virtual .build-deps \
+        pcre-dev \
         build-base; \
     cd /tmp; \
     wget https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz -O nginx-${NGINX_VERSION}.tar.gz; \
@@ -247,16 +248,24 @@ COPY /rootfs/ /
 
 COPY --from=build /usr/local/modsecurity/lib/libmodsecurity.so.${MOD_SECURITY_VERSION} /usr/local/modsecurity/lib/
 COPY --from=build /modules/*.so /${NGINX_MODULES_PATH}/
-COPY --from=build /tmp/modsecurity.conf ${NGINX_CONF_PATH}/conf.d/modsecurity/
-COPY --from=build /tmp/unicode.mapping ${NGINX_CONF_PATH}/conf.d/modsecurity/
-COPY --from=coreruleset /opt/owasp-crs /etc/nginx/conf.d/modsecurity/owasp
+COPY --from=build /tmp/modsecurity.conf /configs/defaults/modsecurity/
+COPY --from=build /tmp/unicode.mapping /configs/defaults/modsecurity/
+COPY --from=coreruleset /opt/owasp-crs /configs/defaults/modsecurity/owasp
 
 # We move crs-setup.conf to templates for now as we set the /etc/nginx as a volume which means once updated the file cannot be updated
-RUN mv /etc/nginx/conf.d/modsecurity/owasp/crs-setup.conf /templates/crs-setup.conf.template; \
-    ln -s /usr/local/modsecurity/lib/libmodsecurity.so.${MOD_SECURITY_VERSION} /usr/local/modsecurity/lib/libmodsecurity.so.3.0; \
+#mv /etc/nginx/conf.d/modsecurity/owasp/crs-setup.conf /templates/crs-setup.conf.template; \
+RUN ln -s /usr/local/modsecurity/lib/libmodsecurity.so.${MOD_SECURITY_VERSION} /usr/local/modsecurity/lib/libmodsecurity.so.3.0; \
     ln -s /usr/local/modsecurity/lib/libmodsecurity.so.${MOD_SECURITY_VERSION} /usr/local/modsecurity/lib/libmodsecurity.so.3; \
     ln -s /usr/local/modsecurity/lib/libmodsecurity.so.${MOD_SECURITY_VERSION} /usr/local/modsecurity/lib/libmodsecurity.so; \
-    setgroup ${NGINX_PREFIX} ${NGINX_CONF_PATH} /var/log/nginx;
+    ln -s ${NGINX_MODULES_PATH} ${NGINX_CONF_PATH}/modules; \
+    ln -s /configs/mime.types ${NGINX_CONF_PATH}/mime.types; \
+    ln -s /configs/defaults ${NGINX_CONF_PATH}/conf.d/defaults; \
+    setgroup /configs/ ${NGINX_PREFIX} ${NGINX_CONF_PATH} {NGINX_MODULES_PATH} /var/log/nginx;
+
+#ln -s /configs/conf.d/modsecurity/modsecurity.conf ${NGINX_CONF_PATH}/conf.d/modsecurity/modsecurity.conf; \
+#ln -s /configs/conf.d/modsecurity/unicode.mapping ${NGINX_CONF_PATH}/conf.d/modsecurity/unicode.mapping; \
+#ln -s /configs/conf.d/modsecurity/owasp/crs-setup.conf ${NGINX_CONF_PATH}/conf.d/modsecurity/owasp/crs-setup.conf; \
+#ln -s /configs/conf.d/modsecurity/owasp/rules ${NGINX_CONF_PATH}/conf.d/modsecurity/owasp/rules; \
 
 # /etc/nginx is Config /webroot is the webroot /var/log/nginx is the log path, /acme is for acme certificates
 # VOLUME [ "/etc/nginx", "/webroot", "/var/log/nginx", "/acme" ]

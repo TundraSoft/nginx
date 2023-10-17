@@ -1,0 +1,1 @@
+0 0 1 * * log-ctl rotate --debug >> /var/log/nginx/rotate_logs.log 2>&1

@@ -1,666 +1,214 @@
 #!/bin/sh
-LOCKFILE=/var/log/nginx/nginx-ctl.lock
 
-# Load Defaults from config
-source /scripts/nginx-ctl-config.sh
-
-# Helpers
-print_message() {
-  local message_type=$1
-  local message=$2
-  local color_code
-  local dt=$(date --utc +%FT%TZ)
-  local host=$(hostname)
-  case $message_type in
-  ERROR) color_code='\033[0;31m' ;;
-  WARN) color_code='\033[0;33m' ;;
-  DEBUG) color_code='\033[1;32m' ;;
-  INFO) color_code='\033[0;36m' ;;
-  esac
-
-  printf "[${dt}@${host}]${color_code}[${message_type}]: ${message}\033[0m\n"
-}
-
-ERROR() {
-  print_message "ERROR" "$1"
-  cleanup
+# Define the lock file
+LOCKFILE="/tmp/$(basename $0).lock"
+CONFIG_FILE="config.json"
+# Ensure only one instance of the script runs at a time
+if [ -e "${LOCKFILE}" ] && kill -0 `cat "${LOCKFILE}"`; then
+  echo "An instance of this script is already running."
   exit 1
+fi
+
+# Create lock file
+trap "rm -f ${LOCKFILE}; exit" INT TERM EXIT
+echo $$ > "${LOCKFILE}"
+
+# Global variables
+DEFAULT_CONFIGS_PATH="/configs/defaults"
+DEBUG=0
+
+# Message handling
+LOG() {
+  local level="$1"
+  shift
+  case "$level" in
+    DEBUG) [ "$DEBUG" -eq 1 ] && echo "[DEBUG] $*";;
+    INFO) echo "[INFO] $*";;
+    WARN) echo "[WARN] $*" 1>&2;;
+    ERROR) echo "[ERROR] $*" 1>&2;;
+    *) echo "$*";;
+  esac
 }
 
-WARN() {
-  print_message "WARN" "$1"
-}
-
-DEBUG() {
-  [ "$DEBUG_MODE" = 1 ] && print_message "DEBUG" "$1"
-}
-
-INFO() {
-  print_message "INFO" "$1"
-}
-
-init() {
-  if [ "${COMMAND}" != 'reload' ]; then
-    if [ -f ${LOCKFILE} ]; then
-      INFO "There is already an instance of this script running. Exiting..."
-      exit 1
-    fi
-    touch ${LOCKFILE}
+# Load configuration
+load_config() {
+  if [ ! -f "$CONFIG_FILE" ]; then
+    echo "Configuration file $CONFIG_FILE does not exist!"
+    exit 1
   fi
+  DEBUG=$(jq -r '.debug' "$CONFIG_FILE")
+  VERBOSE=$(jq -r '.verbose' "$CONFIG_FILE")
+  PATH_TO_SOMETHING=$(jq -r '.path' "$CONFIG_FILE")
+  MAX_AGE=$(jq -r '.max_age' "$CONFIG_FILE")
 }
 
-cleanup() {
-  if [ -f ${LOCKFILE} ]; then
-    rm -f ${LOCKFILE}
-  fi
+# Save configuration
+save_config() {
+  jq ".debug = $DEBUG | .verbose = $VERBOSE | .path = \"$PATH_TO_SOMETHING\" | .max_age = $MAX_AGE" "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
 }
 
-# NOT IMPLEMENTED
-# Config management
-# This script contains a base config file (JSON) where 
-# script defaults are mentioned. This can be dynamically edited 
-# from nginx-cc project (comming soon). Idea is to have a centralised management 
-# infrastructure to manage configurations. However we do not want to loose 
-# indipendant functionality of the nginx server
+# Config Variables
+NGINX_CONF_PATH=/etc/nginx
+NGINX_SITE_PATH=/etc/nginx/sites.d
+NGINX_MODULES_PATH=/usr/local/nginx/modules
+NGINX_CERT_PATH=${NGINX_CONF_PATH}/certs
+NGINX_WEBROOT_PATH=/webroot
+NGINX_CACHE_PATH=/var/cache/nginx
+NGINX_LOG_PATH=/var/log/nginx
+MAXMIND_PATH=${NGINX_CONF_PATH}/maxmind
+MODSEC_AUDIT_STORAGE=/tmp/modsecurity
+MODSEC_DATA_DIR=${MODSEC_AUDIT_STORAGE}/data
+MODSEC_TMP_DIR=${MODSEC_AUDIT_STORAGE}/tmp
+MODSEC_UPLOAD_DIR=${MODSEC_AUDIT_STORAGE}/upload
+SSL_KEY_LENGTH=${SSL_KEY_LENGTH:-4096}
+NGINX_WHITELIST_IPS=${NGINX_WHITELIST_IP:-}
+if [[ "${NGINX_WHITELIST_IP}" = "/run/secrets/*" ]] && [ -f "${NGINX_WHITELIST_IP}" ]; then
+  NGINX_WHITELIST_IPS=$(cat ${NGINX_WHITELIST_IP})
+fi
 
-# Load from config
-config_load() {
-  echo "Not Implemented"
-}
+# Begin Maxmind config
+MAXMIND_DATABASE=${MAXMIND_DATABASE:-'city'}
+MAXMIND_EDITION=${MAXMIND_EDITION:-'geolite2'}
+MAXMIND_LICENSE_KEY=${MAXMIND_LICENSE_KEY:-}
+if [[ "${MAXMIND_LICENSE_KEY}" = "/run/secrets/*" ]] && [ -f "${MAXMIND_LICENSE_KEY}" ]; then
+  MAXMIND_LICENSE_KEY=$(cat ${MAXMIND_LICENSE_KEY})
+fi
 
-# Save to config file
-config_save() {
-  echo "Not Implemented"
-}
-# End Helpers
+# End Maxmind Config
 
-# Variables with defaults
-OPT_FORCE=0
-DEBUG_MODE=0
-OPT_PRIMARY_DOMAIN=
-OPT_DOMAINS=
-OPT_WITH_MODSECURITY=0
-OPT_ENABLE_STUB_STATUS=0
-OPT_ENABLE_PING=0
-OPT_ENABLE_FAVEICON=0
-OPT_CA_CERT=
-OPT_CERT_FILE=
-OPT_CERT_KEY=
-# End Varaibles with defaults
+# Begin Modsecurity Variables
+OPT_MODSEC_CRS_PARANOIA=${CRS_PARANOIA:-1}
+OPT_MODSEC_CRS_BLOCKING_PARANOIA=${CRS_BLOCKING_PARANOIA:-1}
+OPT_MODSEC_CRS_EXECUTING_PARANOIA=${OPT_MODSEC_CRS_PARANOIA}
+OPT_MODSEC_CRS_DETECTION_PARANOIA=${OPT_MODSEC_CRS_BLOCKING_PARANOIA}
+OPT_MODSEC_CRS_ENFORCE_BODYPROC_URLENCODED=${CRS_ENFORCE_BODYPROC_URLENCODED:-1}
+OPT_MODSEC_CRS_VALIDATE_UTF8_ENCODING=${CRS_VALIDATE_UTF8_ENCODING:-0}
+OPT_MODSEC_CRS_ANOMALY_INBOUND=${CRS_ANOMALY_INBOUND:-5}
+OPT_MODSEC_CRS_ANOMALY_OUTBOUND=${CRS_ANOMALY_OUTBOUND:-4}
+OPT_MODSEC_CRS_ALLOWED_METHODS=${CRS_ALLOWED_METHODS:-'GET POST PUT PATCH HEAD OPTIONS DELETE'}
+OPT_MODSEC_CRS_ALLOWED_REQUEST_CONTENT_TYPE=${OPT_MODSEC_CRS_ALLOWED_REQUEST_CONTENT_TYPE:-'|application/x-www-form-urlencoded| |multipart/form-data| |multipart/related| |text/xml| |application/xml| |application/soap+xml| |application/json| |application/cloudevents+json| |application/cloudevents-batch+json|'}
+OPT_MODSEC_CRS_ALLOWED_REQUEST_CONTENT_TYPE_CHARSET=${CRS_ALLOWED_REQUEST_CONTENT_TYPE_CHARSET:-'utf-8|iso-8859-1|iso-8859-15|windows-1252'}
+OPT_MODSEC_CRS_ALLOWED_HTTP_VERSIONS=${CRS_ALLOWED_HTTP_VERSIONS:-'HTTP/1.0 HTTP/1.1 HTTP/2 HTTP/2.0'}
+OPT_MODSEC_CRS_RESTRICTED_EXTENSIONS=${CRS_RESTRICTED_EXTENSIONS:-'.asa/ .asax/ .ascx/ .axd/ .backup/ .bak/ .bat/ .cdx/ .cer/ .cfg/ .cmd/ .com/ .config/ .conf/ .cs/ .csproj/ .csr/ .dat/ .db/ .dbf/ .dll/ .dos/ .htr/ .htw/ .ida/ .idc/ .idq/ .inc/ .ini/ .key/ .licx/ .lnk/ .log/ .mdb/ .old/ .pass/ .pdb/ .pol/ .printer/ .pwd/ .rdb/ .resources/ .resx/ .sql/ .swp/ .sys/ .vb/ .vbs/ .vbproj/ .vsdisco/ .webinfo/ .xsd/ .xsx/'}
+OPT_MODSEC_CRS_RESTRICTED_HEADERS=${CRS_RESTRICTED_HEADERS:-'/content-encoding/ /proxy/ /lock-token/ /content-range/ /if/ /x-http-method-override/ /x-http-method/ /x-method-override/'}
+OPT_MODSEC_CRS_STATIC_EXTENSIONS=${CRS_STATIC_EXTENSIONS:-'/.jpg/ /.jpeg/ /.png/ /.gif/ /.js/ /.css/ /.ico/ /.svg/ /.webp/'}
+OPT_MODSEC_CRS_MAX_NUM_ARGS=${CRS_MAX_NUM_ARGS:-'unlimited'}
+OPT_MODSEC_CRS_ARG_NAME_LENGTH=${CRS_ARG_NAME_LENGTH:-'unlimited'}
+OPT_MODSEC_CRS_ARG_LENGTH=${CRS_ARG_LENGTH:-'unlimited'}
+OPT_MODSEC_CRS_TOTAL_ARG_LENGTH=${CRS_TOTAL_ARG_LENGTH:-'unlimited'}
+OPT_MODSEC_CRS_MAX_FILE_SIZE=${CRS_MAX_FILE_SIZE:-'unlimited'}
+OPT_MODSEC_CRS_COMBINED_FILE_SIZES=${CRS_COMBINED_FILE_SIZES:-'unlimited'}
+OPT_MODSEC_CRS_ENABLE_TEST_MARKER=${CRS_ENABLE_TEST_MARKER:-0}
+OPT_MODSEC_CRS_REPORTING_LEVEL=${CRS_REPORTING_LEVEL:-2}
+OPT_MODSEC_AUDIT_ENGINE=${MODSEC_AUDIT_ENGINE:-"RelevantOnly"}
+OPT_MODSEC_AUDIT_LOG_FORMAT=${MODSEC_AUDIT_LOG_FORMAT:-JSON}
+OPT_MODSEC_AUDIT_LOG_TYPE=${MODSEC_AUDIT_LOG_TYPE:-Serial}
+OPT_MODSEC_AUDIT_LOG=${NGINX_LOG_PATH}/$server_name/modsec_audit.log
+OPT_MODSEC_AUDIT_LOG_PARTS=${MODSEC_AUDIT_LOG_PARTS:-'ABIJDEFHZ'}
+OPT_MODSEC_AUDIT_STORAGE=${MODSEC_AUDIT_STORAGE}
+OPT_MODSEC_DATA_DIR=${MODSEC_DATA_DIR}
+OPT_MODSEC_DEBUG_LOG=${MODSEC_DEBUG_LOG:-/dev/null}
+OPT_MODSEC_DEBUG_LOGLEVEL=${MODSEC_DEBUG_LOGLEVEL:-0}
+OPT_MODSEC_DEFAULT_PHASE1_ACTION=${MODSEC_DEFAULT_PHASE1_ACTION:-"phase:1,pass,log,tag:'\${MODSEC_TAG}'"}
+OPT_MODSEC_DEFAULT_PHASE2_ACTION=${MODSEC_DEFAULT_PHASE2_ACTION:-"phase:2,pass,log,tag:'\${MODSEC_TAG}'"}
+OPT_MODSEC_PCRE_MATCH_LIMIT_RECURSION=${MODSEC_PCRE_MATCH_LIMIT_RECURSION:-100000}
+OPT_MODSEC_PCRE_MATCH_LIMIT=${MODSEC_PCRE_MATCH_LIMIT:-100000}
+OPT_MODSEC_REQ_BODY_ACCESS=${MODSEC_REQ_BODY_ACCESS:-on}
+OPT_MODSEC_REQ_BODY_LIMIT=${MODSEC_REQ_BODY_LIMIT:-13107200}
+OPT_MODSEC_REQ_BODY_LIMIT_ACTION=${MODSEC_REQ_BODY_LIMIT_ACTION:-"Reject"}
+OPT_MODSEC_REQ_BODY_JSON_DEPTH_LIMIT=${MODSEC_REQ_BODY_JSON_DEPTH_LIMIT:-512}
+OPT_MODSEC_REQ_BODY_NOFILES_LIMIT=${MODSEC_REQ_BODY_NOFILES_LIMIT:-131072}
+OPT_MODSEC_RESP_BODY_ACCESS=${MODSEC_RESP_BODY_ACCESS:-on}
+OPT_MODSEC_RESP_BODY_LIMIT=${MODSEC_RESP_BODY_LIMIT:-524288}
+OPT_MODSEC_RESP_BODY_LIMIT_ACTION=${MODSEC_RESP_BODY_LIMIT_ACTION:-"ProcessPartial"}
+OPT_MODSEC_RESP_BODY_MIMETYPE=${MODSEC_RESP_BODY_MIMETYPE:-"text/plain text/html text/xml"}
+OPT_MODSEC_RULE_ENGINE=${MODSEC_RULE_ENGINE:-on}
+OPT_MODSEC_STATUS_ENGINE=${MODSEC_STATUS_ENGINE:-on}
+OPT_MODSEC_TAG=${MODSEC_TAG:-'modsecurity'}
+OPT_MODSEC_TMP_DIR=${MODSEC_TMP_DIR}
+OPT_MODSEC_TMP_SAVE_UPLOADED_FILES=${MODSEC_TMP_SAVE_UPLOADED_FILES:-on}
+OPT_MODSEC_UPLOAD_DIR=${MODSEC_UPLOAD_DIR}
+# End modsecurity Variables
 
+
+# Usage function
 usage() {
-  echo "Usage: ${0} COMMAND [OPTIONS]"
-  echo
-  echo "Script to manage NGINX configuration"
-  echo
+  echo "Usage: $0 <command> [options]"
+  echo ""
   echo "Commands:"
-  echo
-  echo "-------------------------------------------------------------------------------"
-  echo "                                  NGINX                                        "
-  echo "-------------------------------------------------------------------------------"
-  echo
-  echo "  initialize                                  Ensure all folders are present and having the right permissions"
-  echo 
-  echo "  configure                                   Configure base nginx server"
-  echo
-  echo "  dhparams                                    Generate dhparams.pem file if not present"
-  echo 
-  echo "  add-site                                    Add new site"
-  echo "    Options:"
-  echo "      -d, --domain <TLD>                      The domain for which to create the site. If multiple domains are specified, then the first domain will be used as the primary domain"
-  echo "          --cert-file <FILE>                  Certificate file name (must be inside ${NGINX_CONF_PATH}/certs/ directory)"
-  echo "          --cert-key <FILE>                   Certificate key file name (must be inside ${NGINX_CONF_PATH}/certs/ directory)"
-  echo "          --ca-cert <FILE>                    CA file for OSCP stappling (must be inside ${NGINX_CONF_PATH}/certs/ directory). If empty then it wont be enabled"
-  echo "          --with-modsecurity                  Enable modsecurity with default rules on this site"
-  echo "          --custom-modsecurity                Create custom mod security and owasp for this site"
-  echo "          --enable-stub-status                Enable nginx stub status. Will be available in /healthz"
-  echo "          --enable-ping                       Enable ping pong location. Defaults to /ping"
-  echo "          --enable-faveicon                   Add faveicon patch - Prevent logging and 404 not found"
-  echo
-  echo "  list-sites                                  List all sites"
-  echo
-  echo "  enable-site                                 Renew certificate. If domain is not specified, then all certificates will be renewed"
-  echo "    Options:"
-  echo "      -d, --domain <TLD>                      The domain to be enabled. The primary domain should be passed. Passing alternate domain will throw error"
-  echo "                                              If no domain is specified then all sites will be enabled"
-  echo
-  echo "  disable-site                                Renew certificate. If domain is not specified, then all certificates will be renewed"
-  echo "    Options:"
-  echo "      -d, --domain <TLD>                      The domain to be disabled. The primary domain should be passed. Passing alternate domain will throw error"
-  echo "                                              If no domain is specified then all sites will be enabled"
-  echo
-  echo "  reload                                      Reload nginx configuration"
-  echo
-  # echo "###############################################################################"
-  # echo "#                                 Upstream                                     "
-  # echo "###############################################################################"
-  # echo 
-  # echo "  add-upstream"
-  # echo "     Options:"
-  # echo "          --upstream-ip                     List of IP address to use as upstream"
-  # echo "          --upstream-hostname               The hostname for upstream (uses jdomain)"
-  # echo "          --upstream-hostname-ip            Max number of IP's to fetch for hostname"
-  # echo "          --upstream-hostname-v6            Use IPv6"
-  # echo "          --upstream-hostname-int           Hostname resolve interval in seconds. Default 1"
-  # echo "          --upstream-port                   The docker port this domain uses as upstream"
-  # echo "          --upstream-weight                 The docker weight this domain uses as upstream"
-  # echo "          --upstream-fail-timeout           The docker fail timeout this domain uses as upstream"
-  # echo "          --upstream-max-fails              The docker max fails this domain uses as upstream"
-  echo 
-  echo "-------------------------------------------------------------------------------"
-  echo "-                                  MaxMind                                    -"
-  echo "-------------------------------------------------------------------------------"
-  echo
-  echo "  maxmind-download                            Download MaxMind database"
-  echo "    Options:"
-  echo "          --key <KEY>                         The MaxMind license key"
-  echo "          --edition <EDITION>                 The MaxMind edition to download, defaults to geoip2lite"
-  echo "          --database <DATABASE>               The MaxMind database to download, defaults to city"
-  echo
-  echo "-------------------------------------------------------------------------------"
-  echo "-                                Log Management                               -"
-  echo "-------------------------------------------------------------------------------"
-  echo
-  echo "  consolidate-logs                            Consolidate log files"
-  echo 
-  echo "  purge-logs                                  Purge log files"
-  echo
+  echo "  sample         Run the sample command."
+  echo ""
   echo "Options:"
-  echo "  -h, --help                                  Show this help message and exit"
-  echo "  -c, --config <FILE>                         The configuration file to use"
-  echo "      --debug                                 Enable debug messages to be displayed"
-  echo "      --force                                 Force the command to run"
-  echo
+  echo "  -d             Turn on debug mode."
+  echo "  -v             Turn on verbose mode (info level logging)."
+  echo "  -h             Display this help message."
 }
 
-# NGINX management
-# command_ensure_permissions() {
-command_initialize() {
-  # Set nginx folder permission
-  # chown -R ${UNAME}:${GNAME} /usr/local/nginx
-  # Create nginx.pid if missing
-  INFO "Ensuring pid file exists"
-  if [ ! -f "/var/run/nginx.pid" ];
-  then
-    touch /var/run/nginx.pid
+generate_modules() {
+  local MODULE_PATH={$1:-${NGINX_MODULES_PATH}}
+  local OUT_PATH="${DEFAULT_CONFIGS_PATH}/modules.conf"
+  if [ -f ${MODULE_PATH}/ngx_stream_module.so ]; then
+    LOG DEBUG "Adding Stream modules first as there could be dependencies"
+    LOG INFO "Adding module       : ngx_stream_module"
+    echo "load_module ${MODULE_PATH}/ngx_stream_module.so;" >> "${OUT_PATH}"
   fi
-  # set pid permission
-  INFO "Setting permissions for pid file"
-  setgroup /var/run/nginx.pid
-
-  # Executables
-  INFO "Setting permissions for core nginx paths"
-  setgroup ${NGINX_CONF_PATH}
-  setgroup /usr/local/nginx
-
-  # ${MODSEC_AUDIT_STORAGE} is inside nginx log path
-  for i in /webroot /templates ${MODSEC_DATA_DIR} ${MODSEC_TMP_DIR} ${MODSEC_UPLOAD_DIR} ${NGINX_CACHE_PATH} ${NGINX_LOG_PATH} 
-  do
-    if [ ! -d "${i}" ]
-    then
-      INFO "Creating ${i}"
-      mkdir -p ${i}
-    fi
-    INFO "Ensuring ownership for ${i}"
-    setgroup ${i}
-  done
-  INFO "Initializing ACME"
-}
-
-ensure_permissions() {
-  for dir in /webroot /templates ${NGINX_CONF_PATH} ${NGINX_LOG_PATH} ${NGINX_CACHE_PATH}
-  do
-    INFO "Updating permissions for ${dir}"
-    setgroup ${dir}
-  done
-}
-
-command_configure() {
-  WARN "Running nginx configuration! All settings will be reset. Site configuration etc will not be affected."
-  WARN "This should mainly be run when starting a container"
-  command_initialize
-  acme-ctl initialize
-  # Pre Configure tasks
-  rm -rf /tmp/config
-  mkdir -p /tmp/config/conf.d
-  # Maxmind
-  if [ "${OPT_MAXMIND_KEY}" != "" ] && [ ! -f ${MAXMIND_PATH}/maxmind.mmdb ]; then
-    DEBUG "Configure - Downloading Maxmind database"
-    command_maxmind_fetch
-  fi
-  # DHPARAM
-  if [ ! -f ${NGINX_CONF_PATH}/dhparam.pem ]; then
-    command_dhparams /tmp/config
-  fi
-
-  # OK We can now start generating the config files
-  DEBUG "Generating modules.conf"
-  cp -f /templates/modules.conf.template /tmp/config/conf.d/modules.conf
-  if [ -f ${NGINX_MODULES_PATH}/ngx_stream_module.so ]; then
-    DEBUG "Adding Stream modules first as there could be dependencies"
-    INFO "Adding module       : ngx_stream_module"
-    echo "load_module ${NGINX_MODULES_PATH}/ngx_stream_module.so;" >> /tmp/config/conf.d/modules.conf
-  fi
-  for file in ${NGINX_MODULES_PATH}/*.so; do
-    if [ "$file" != "${NGINX_MODULES_PATH}/ngx_stream_module.so" ]; then
+  for file in ${MODULE_PATH}/*.so; do
+    if [ "$file" != "${MODULE_PATH}/ngx_stream_module.so" ]; then
       filename=$(basename -s .so $file)
-      INFO "Adding module       : ${filename}"
-      echo "load_module ${file};" >> /tmp/config/conf.d/modules.conf
+      LOG INFO "Adding module       : ${filename}"
+      echo "load_module ${file};" >> "${OUT_PATH}"
     fi
   done
-  
-  DEBUG "Generate Whitelist"
-  cp -f /templates/whitelist.conf.template /tmp/config/conf.d/whitelist.conf
-  if [ ! -z "${OPT_NGINX_WHITELIST_IP}" ]; then
-    DEBUG "Adding whitelist IP address"
-    # OPT_NGINX_WHITELIST_IP is a comma seperated list of IP addresses, loop throw and add
-    for ip in $(echo ${OPT_NGINX_WHITELIST_IP} | sed "s/,/ /g"); do
-      DEBUG "Whitelisting IP/IP Range      : ${ip}"
-      echo "allow ${ip};" >> /tmp/config/conf.d/whitelist.conf
-    done
-  fi
-
-  DEBUG "Creating VTS config for sites"
-  cp /templates/default-vts.conf.template /tmp/config/conf.d/default-vts.conf
-
-  DEBUG "Enabling GEOIP and related configs"
-  # Maxmind
-  if [ -f "${MAXMIND_PATH}/maxmind.mmdb" ]; then
-    INFO "Enabling configuration related to MaxMing GEOIP"
-    if [ "${OPT_MAXMIND_DATABASE}" == "City" ]; then
-      cp /templates/maxmind-city.conf.template /tmp/config/conf.d/maxmind.conf
-    else
-      cp /templates/maxmind-country.conf.template /tmp/config/conf.d/maxmind.conf
-    fi
-    # Enable vts geoip
-    sed -i 's|#vhost_traffic_status_filter_by_set_key $geoip_country_code country::$server_name;|vhost_traffic_status_filter_by_set_key $geoip_country_code country::$server_name;|' /tmp/config/conf.d/default-vts.conf
-  fi
-  if [ -f ${ACME_HOME}/thumbprint.conf ]; then
-    source ${ACME_HOME}/thumbprint.conf
-  fi
-  # ACME Stateless
-  if [ "${OPT_ACME_THUMBPRINT}" != "" ]; then
-    INFO "Generating ACME stateless config"
-    export OPT_ACME_THUMBPRINT=$OPT_ACME_THUMBPRINT
-    envsubst '$OPT_ACME_THUMBPRINT' < /templates/acme-stateless.conf.template > /tmp/config/conf.d/acme-stateless.conf
-  fi
-
-  # Modsecurity
-  DEBUG "Enabling ModSecurity"
-  configure_modsecurity
-  
-  DEBUG "Generating main nginx config"
-  # NGINX.conf
-  export NGINX_CACHE_PATH=$NGINX_CACHE_PATH OPT_NGINX_MAX_BODY_SIZE=$OPT_NGINX_MAX_BODY_SIZE
-  envsubst '$NGINX_CACHE_PATH,$OPT_NGINX_MAX_BODY_SIZE' < /templates/nginx.conf.template > /tmp/config/nginx.conf
-  # Substitude 
-  DEBUG "Replacing/Enabling basis config"
-  if [ -f /tmp/config/conf.d/maxmind.conf ]; then
-    # Enable maxmind
-    sed -i 's|#include /etc/nginx/conf.d/maxmind.conf;|include /etc/nginx/conf.d/maxmind.conf;|' /tmp/config/nginx.conf
-    # Enable in vhost
-    sed -i 's|#vhost_traffic_status_filter_by_set_key $geoip_country_code country::*|vhost_traffic_status_filter_by_set_key $geoip_country_code country::*|' /tmp/config/nginx.conf
-  fi
-  if [ -f /tmp/config/conf.d/acme-stateless.conf ]; then
-    # Enable in nginx.conf
-    sed -i 's|#include /etc/nginx/conf.d/acme-stateless.conf;|include /etc/nginx/conf.d/acme-stateless.conf;|' /etc/nginx/sites.d/00-default-site.conf
-  else
-    # Disable in nginx.conf
-    sed -i 's|include /etc/nginx/conf.d/acme-stateless.conf;|#include /etc/nginx/conf.d/acme-stateless.conf;|' /etc/nginx/sites.d/00-default-site.conf
-  fi
-  
-  # Done. Lets move the files
-  INFO "Generated Configs"
-  INFO "nginx.conf                : Main NGINX Configuration"
-  INFO "modules.conf              : Modules to be imported"
-  INFO "whitelist.conf            : Whitelisted IPs for sensitive path access"
-  INFO "default-vts.conf          : VTS configuration for sites. Has config for geoip etc"
-  if [ -f /tmp/config/dhparam.pem ]; then
-    INFO "dhparam.pem               : DHParams file"
-  fi
-  if [ -f /tmp/config/maxmind.conf ]; then
-    INFO "maxmind.conf              : Maxmind GeoIP config (${OPT_MAXMIND_EDITION}-${OPT_MAXMIND_DATABASE})"
-  fi
-  if [ -f /tmp/config/acme-stateless.conf ]; then
-    INFO "acme-stateless.conf       : ACME Stateless support"
-  fi
-
-  DEBUG "Moving configuration files"
-  cp -f /tmp/config/nginx.conf ${NGINX_CONF_PATH}/nginx.conf
-  cp -f /tmp/config/conf.d/*.conf ${NGINX_CONF_PATH}/conf.d/
-  if [ -f /tmp/config/dhparam.pem ]; then
-    cp -f /tmp/config/dhparam.pem ${NGINX_CONF_PATH}/dhparam.pem
-  fi
-  cp -f /tmp/config/modsecurity-override.conf ${NGINX_CONF_PATH}/conf.d/modsecurity/
-  cp -f /tmp/config/crs-setup.conf ${NGINX_CONF_PATH}/conf.d/modsecurity/owasp/
-  
-  DEBUG "Setting permissions"
-  ensure_permissions
-
-  if ! su -s /bin/sh -c 'nginx -t' tundra; then
-    # Config is valid, lets reload
-   ERROR "NGINX config is not valid."
-  fi
-  rm -rf /tmp/config
 }
 
-command_reload() {
-  if [ $(whoami) == "root" ]; then
-    su -s /bin/sh -c 'nginx-ctl reload' tundra
-  else
-    local CONFIG_HASH=$(nginx -T | sha512sum | sed "s/ *\-$//")
-    local HASH_FILE=/tmp/nginx.hash
-    local CURRENT_HASH=
-    if [ -f "${HASH_FILE}" ]; then
-      # Load the value
-      CURRENT_HASH=$(cat ${HASH_FILE})
-    fi
-    INFO "Config Hash    : ${CONFIG_HASH}"
-    INFO "Current Hash   : ${CURRENT_HASH}"
-    INFO "Force Flag     : ${OPT_FORCE}"
-    if [ "$CURRENT_HASH" != $CONFIG_HASH ] || [ "$OPT_FORCE" == 1 ]; then
-      INFO "Hash mismatch. Testing current config"
-      if ! nginx -t; then
-        ERROR "Invalid nginx config. Ignoring changes."
-      fi
-      INFO "Reloading nginx config"
-      if ! nginx -s reload; then
-        ERROR "Failed to reload nginx config"
-      fi
-    fi
-    echo ${CONFIG_HASH} > ${HASH_FILE}
-  fi
-}
-
-command_dhparams() {
+generate_dhparams() {
   local OUT_PATH=${1:-${NGINX_CONF_PATH}}
   if [ ! -f ${OUT_PATH}/dhparam.pem ]; then
-    INFO "Generating dhparam.pem with key length: ${OPT_SSL_KEY_LENGTH}"
-    openssl dhparam -dsaparam -out ${OUT_PATH}/dhparam.pem ${OPT_SSL_KEY_LENGTH};
+    LOG DEBUG "Generating dhparam.pem with key length: ${SSL_KEY_LENGTH}"
+    openssl dhparam -dsaparam -out ${OUT_PATH}/dhparam.pem ${SSL_KEY_LENGTH};
     # Set permission
     setgroup ${OUT_PATH}/dhparam.pem
   fi
 }
 
-command_list_sites() {
-  DEBUG "Listing Sites"
-  INFO "-------------------------------------------------------------------------------"
-  INFO "Sites which are ENABLED: "
-  for file in ${NGINX_SITE_PATH}/*.conf; do
-    INFO "    $(basename $file)"
-  done
-  INFO "-------------------------------------------------------------------------------"
-  INFO "Sites which are DISABLED: "
-  for file in ${NGINX_SITE_PATH}/*.conf.disabled; do
-    INFO "    $(basename $file)"
-  done
+generate_whitelist() {
+  local WHITELIST_FILE="${DEFAULT_CONFIGS_PATH}/whitelist.conf"
+  if [ ! -z "${NGINX_WHITELIST_IPS}" ]; then
+    LOG DEBUG "Adding whitelist IP address"
+    # NGINX_WHITELIST_IPS is a comma seperated list of IP addresses, loop and add
+    for ip in $(echo ${NGINX_WHITELIST_IPS} | sed "s/,/ /g"); do
+      LOG DEBUG "Whitelisting IP/IP Range      : ${ip}"
+      echo "allow ${ip};" >> "${WHITELIST_FILE}"
+    done
+  fi
 }
 
-command_add_site() {
-  local SSL_STAPLING_ENABLED=0
-  local SSL_ENABLED=0
-  if [ "${OPT_PRIMARY_DOMAIN}" == "" ]; then
-    ERROR "Atleast one value for domain must be passed"
-  fi
-  if [ -f "${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf" ] || [ -f "${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf.disabled" ]; then
-    ERROR "Configutation for domain ${OPT_PRIMARY_DOMAIN} already exists!"
-  fi
-  
-  # Check if cert file and key file is present
-  if [ "${OPT_CERT_FILE}" != "" ]; then
-    if [ ! -f "${NGINX_CERT_PATH}/${OPT_CERT_FILE}" ]; then
-      ERROR "Certificate file ${OPT_CERT_FILE} does not exist!"
-    fi
-    if [ ! -f "${NGINX_CERT_PATH}/${OPT_CERT_KEY}" ]; then
-      ERROR "Key file ${OPT_CERT_KEY} does not exist!"
-    fi
-    SSL_ENABLED=1
-    # If CA file is present, then enable OSCP stappling
-    if [ "${OPT_CA_CERT}" != "" ]; then
-      if [ ! -f "${NGINX_CERT_PATH}/${OPT_CA_CERT}" ]; then
-        ERROR "CA file ${OPT_CA_CERT} does not exist!"
-      fi
-      SSL_STAPLING_ENABLED=1
-    fi
-  else
-    # See if the certificate file is present
-    if [ -f ${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN}.crt ] && [ -f ${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN}.pem ]; then
-      SSL_ENABLED=1
-      OPT_CERT_FILE=${OPT_PRIMARY_DOMAIN}.crt
-      OPT_CERT_KEY=${OPT_PRIMARY_DOMAIN}.pem
-      # If CA file is present, then enable OSCP stappling
-      if [ -f ${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN}_ca.crt ]; then
-        OPT_CA_CERT=${OPT_PRIMARY_DOMAIN}_ca.crt
-        SSL_STAPLING_ENABLED=1
-      fi
-    fi
-  fi
-
-  # Lets create directories
-  INFO "Site ${PRIMARY_DOMAIN} configs:"
-  INFO "Webroot                 : ${NGINX_WEBROOT_PATH}/${OPT_PRIMARY_DOMAIN}"
-  INFO "Logs                    : ${NGINX_LOG_PATH}/${OPT_PRIMARY_DOMAIN}"
-  INFO "Cache                   : ${NGINX_CACHE_PATH}/${OPT_PRIMARY_DOMAIN}"
-  INFO "Config                  : ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf"
-  if [ "${SSL_ENABLED}" == 1 ]; then
-    INFO "Certificate             : ${NGINX_CERT_PATH}/${OPT_CERT_FILE}"
-    INFO "Key                     : ${NGINX_CERT_PATH}/${OPT_CERT_KEY}"
-    if [ "${SSL_STAPLING_ENABLED}" == 1 ]; then
-      INFO "CA                      : ${NGINX_CERT_PATH}/${OPT_CA_CERT}"
-    fi
-  fi
-  DEBUG "Creating directories"
-  mkdir -p ${NGINX_WEBROOT_PATH}/${OPT_PRIMARY_DOMAIN} ${NGINX_LOG_PATH}/${OPT_PRIMARY_DOMAIN} ${NGINX_CACHE_PATH}/${OPT_PRIMARY_DOMAIN}
-
-  DEBUG "Creating the site config"
-  # Create the file
-  export PRIMARY_DOMAIN=$OPT_PRIMARY_DOMAIN ALL_DOMAINS=$OPT_DOMAINS NGINX_CACHE_PATH=$NGINX_CACHE_PATH
-  envsubst '$PRIMARY_DOMAIN, $ALL_DOMAINS, $NGINX_CACHE_PATH' < /templates/site.conf.template > ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
-  
-  DEBUG "Enabling SSL in config"
-  if [ "${SSL_ENABLED}" == 1 ];
-  then
-    DEBUG "Updating config to enable ssl"
-    sed -i 's|#listen                         443 ssl;|listen                         443 ssl;|' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
-    sed -i 's|#listen                         \[::\]:443 ssl;|listen                         [::]:443 ssl;|' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
-    sed -i 's|#ssl_certificate                /etc/nginx/certs/$server_name.crt;|ssl_certificate                /etc/nginx/certs/'"${OPT_CERT_FILE}"';|' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
-    sed -i 's|#ssl_certificate_key            /etc/nginx/certs/$server_name.key;|ssl_certificate_key            /etc/nginx/certs/'"${OPT_CERT_KEY}"';|' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
-    sed -i 's|#add_header Strict-Transport-Security "max-age=63072000; includeSubdomains; preload" always;|add_header Strict-Transport-Security "max-age=63072000; includeSubdomains; preload" always;|' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
-    if [ "${SSL_STAPLING_ENABLED}" == 1 ]; then
-      DEBUG "Enabling SSL stapling"
-      sed -i 's|#ssl_stapling                   on;|ssl_stapling                   on;|' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
-      sed -i 's|#ssl_stapling_verify            on;|ssl_stapling_verify            on;|' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
-      sed -i 's|#ssl_trusted_certificate        /etc/nginx/certs/$server_name_ca.crt;|ssl_trusted_certificate        /etc/nginx/certs/'"${OPT_CA_CERT}"';|' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
-    fi
-    sed -i 's|#include /etc/nginx/conf.d/https-redirect.conf;|include /etc/nginx/conf.d/https-redirect.conf;|' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
-  fi
-
-  DEBUG "Checking if stub status, ping pong and faveicon patch needs to be enabled"
-  if [ "${OPT_ENABLE_STUB_STATUS}" == 1 ]; then
-    DEBUG "Enabling stub status"
-    sed -i 's|#include /etc/nginx/conf.d/default-location-healthz.conf;|include /etc/nginx/conf.d/default-location-healthz.conf;|' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
-  fi
-  if [ "${OPT_ENABLE_PING}" == 1 ]; then
-    DEBUG "Enabling ping pong"
-    sed -i 's|#include /etc/nginx/conf.d/default-location-ping;|include /etc/nginx/conf.d/default-location-ping.conf;|' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
-  fi
-  if [ "${OPT_ENABLE_FAVEICON}" == 1 ]; then
-    DEBUG "Enabling faveicon patch"
-    sed -i 's|#include /etc/nginx/conf.d/default-location-faveicon.conf;|include /etc/nginx/conf.d/default-location-faveicon.conf;|' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
-  fi
-  
-  if [ "${OPT_WITH_MODSECURITY}" != 0 ]; then
-    DEBUG "Enabling modsecurity"
-    sed -i 's|modsecurity off;|modsecurity on;|' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
-    if [ "${OPT_WITH_MODSECURITY}" == 2 ]; then
-      DEBUG "Creating custom mod security files (current config will be taken)"
-      # Clone existing modsecurity configuration
-      # Main includes file
-      cp -f ${NGINX_CONF_PATH}/conf.d/modsecurity/modsecurity-includes.conf ${NGINX_CONF_PATH}/conf.d/modsecurity/${PRIMARY_DOMAIN}-modsecurity-includes.conf
-      # Override file
-      cp -f ${NGINX_CONF_PATH}/conf.d/modsecurity/modsecurity-override.conf ${NGINX_CONF_PATH}/conf.d/modsecurity/${PRIMARY_DOMAIN}-modsecurity.conf
-      # CRS file
-      cp -f ${NGINX_CONF_PATH}/conf.d/modsecurity/owasp/crs-setup.conf ${NGINX_CONF_PATH}/conf.d/modsecurity/owasp/${PRIMARY_DOMAIN}-crs-setup.conf
-      # replace the includes
-      sed -i 's|Include /etc/nginx/conf.d/modsecurity/modsecurity-override.conf|Include /etc/nginx/conf.d/modsecurity/'"${PRIMARY_DOMAIN}"'-modsecurity-override.conf|' ${NGINX_CONF_PATH}/conf.d/modsecurity/${PRIMARY_DOMAIN}-modsecurity-includes.conf
-      sed -i 's|Include /etc/nginx/conf.d/modsecurity/owasp/crs-setup.conf|Include /etc/nginx/conf.d/modsecurity/owasp/'"${PRIMARY_DOMAIN}"'crs-setup.conf|' ${NGINX_CONF_PATH}/conf.d/modsecurity/${PRIMARY_DOMAIN}-modsecurity-includes.conf
-      # Update ${PRIMARY_DOMAIN}-modsecurity.conf to point to those 2
-      sed -i 's|#include /etc/nginx/conf.d/default-modsecurity.conf;|include /etc/nginx/conf.d/'"${PRIMARY_DOMAIN}"'-modsecurity.conf;|' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
-    fi
-  fi
-
-  INFO "Ensuring right permissions are present"
-  setgroup ${NGINX_WEBROOT_PATH}/${OPT_PRIMARY_DOMAIN}
-  setgroup ${NGINX_LOG_PATH}/${OPT_PRIMARY_DOMAIN}
-  if [ "${SSL_ENABLED}" == 1 ]; then
-    setgroup ${NGINX_CERT_PATH}/${OPT_CERT_FILE} ${NGINX_CERT_PATH}/${OPT_CERT_KEY}
-    if [ "${SSL_STAPLING_ENABLED}" == 1 ]; then
-      setgroup ${NGINX_CERT_PATH}/${OPT_CA_CERT}
-    fi
-  fi
-  setgroup ${NGINX_CACHE_PATH}/${OPT_PRIMARY_DOMAIN}
-  setgroup ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
-  
-  # if ! nginx -t; then
-  #   ERROR "Error with nginx configuration file! Skipping reload..."
-  # fi
-  # nginx -s reload
-  command_reload
-}
-
-command_disable_site() {
-  if [ "${OPT_PRIMARY_DOMAIN}" == "" ]; then
-    ERROR "Domain name is not set"
-  fi
-  if [ -f ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf.disabled ]; then
-    INFO "Site ${OPT_PRIMARY_DOMAIN} is already disabled"
-    exit 0
-  fi
-  if [ -f ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf ]; then
-    mv ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf.disabled
-    INFO "Site ${OPT_PRIMARY_DOMAIN} disabled."
-  else
-    ERROR "Site configuration for ${OPT_PRIMARY_DOMAIN} not found"
-  fi
-  setgroup ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf.disabled
-  # if ! nginx -t; then
-  #   ERROR "Error with nginx configuration file! Skipping reload..."
-  # fi
-  # nginx -s reload
-  command_reload
-}
-
-command_enable_site() {
-  if [ "${OPT_PRIMARY_DOMAIN}" == "" ]; then
-    ERROR "Domain name is not set"
-  fi
-  if [ -f ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf ]; then
-    INFO "Site ${OPT_PRIMARY_DOMAIN} is already enabled"
-    exit 0
-  fi
-  if [ -f ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf.disabled ]; then
-    mv ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf.disabled ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
-    INFO "Site ${OPT_PRIMARY_DOMAIN} enabled."
-  else
-    ERROR "Site configuration for ${OPT_PRIMARY_DOMAIN} not found"
-  fi
-  setgroup ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
-  # if ! nginx -t; then
-  #   ERROR "Error with nginx configuration file! Skipping reload..."
-  # fi
-  # nginx -s reload
-  command_reload
-}
-
-command_disable_ssl() {
-  if [ "${OPT_PRIMARY_DOMAIN}" == "" ]; then
-    ERROR "Domain name is not set"
-  fi
-  DEBUG "Updating config to disable ssl"
-  sed -i '/listen\s*443 ssl/s/listen/#listen/g' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
-  sed -i '/listen\s*\[::\]:443 ssl/s/listen/#listen/g' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
-  sed -i '/ssl_certificate /s/ssl_certificate/#ssl_certificate/g' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
-  sed -i '/ssl_certificate_key /s/ssl_certificate_key/#ssl_certificate_key/g' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
-  sed -i '/ssl_stapling /s/ssl_stapling/#ssl_stapling/g' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
-  sed -i '/ssl_stapling_verify /s/ssl_stapling_verify/#ssl_stapling_verify/g' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
-  sed -i '/ssl_trusted_certificate /s/ssl_trusted_certificate/#ssl_trusted_certificate/g' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
-  sed -i '/add_header Strict-Transport-Security/s/add_header/#add_header/g' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
-  sed -i 's|include /etc/nginx/conf.d/https-redirect.conf;|#include /etc/nginx/conf.d/https-redirect.conf;|' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
-  setgroup ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
-  # if ! nginx -t; then
-  #   ERROR "Error with nginx configuration file! Skipping reload..."
-  # fi
-  # nginx -s reload
-  command_reload
-}
-
-command_enable_ssl() {
-  if [ "${OPT_PRIMARY_DOMAIN}" == "" ]; then
-    ERROR "Domain name is not set"
-  fi
-  # Auto detect if not provided
-  WARN "ENABLING SSL WITHOUT CHECKING IF CERTIFICATE EXISTS OR ITS VALIDITY!"
-  DEBUG "Updating config to enable ssl"
-  sed -i '/#listen\s*443 ssl/s/#//g' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
-  sed -i '/#listen\s*\[::\]:443 ssl/s/#//g' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
-  sed -i '/#ssl_certificate /s/#//g' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
-  sed -i '/#ssl_certificate_key /s/#//g' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
-  sed -i '/#ssl_stapling /s/#//g' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
-  sed -i '/#ssl_stapling_verify /s/#//g' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
-  sed -i '/#ssl_trusted_certificate /s/#//g' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
-  sed -i '/#add_header Strict-Transport-Security/s/#//g' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
-  sed -i 's|#include /etc/nginx/conf.d/https-redirect.conf;|include /etc/nginx/conf.d/https-redirect.conf;|' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
-  setgroup ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
-  # if ! nginx -t; then
-  #   ERROR "Error with nginx configuration file! Skipping reload..."
-  # fi
-  # nginx -s reload
-  command_reload
-}
-
-# Modsecurity
-configure_modsecurity() {
-  DEBUG "Setup overrides"
+generate_modsecurity() {
+  local setup_conf_path="${DEFAULT_CONFIGS_PATH}/modsecurity/owasp/crs-setup.conf"
   export OPT_MODSEC_AUDIT_ENGINE=$OPT_MODSEC_AUDIT_ENGINE OPT_MODSEC_AUDIT_LOG=$OPT_MODSEC_AUDIT_LOG OPT_MODSEC_AUDIT_LOG_FORMAT=$OPT_MODSEC_AUDIT_LOG_FORMAT OPT_MODSEC_AUDIT_LOG_PARTS=$OPT_MODSEC_AUDIT_LOG_PARTS OPT_MODSEC_AUDIT_STORAGE=$OPT_MODSEC_AUDIT_STORAGE OPT_MODSEC_AUDIT_LOG_TYPE=$OPT_MODSEC_AUDIT_LOG_TYPE OPT_MODSEC_DATA_DIR=$OPT_MODSEC_DATA_DIR OPT_MODSEC_DEBUG_LOG=$OPT_MODSEC_DEBUG_LOG OPT_MODSEC_DEBUG_LOGLEVEL=$OPT_MODSEC_DEBUG_LOGLEVEL OPT_MODSEC_PCRE_MATCH_LIMIT=$OPT_MODSEC_PCRE_MATCH_LIMIT OPT_MODSEC_PCRE_MATCH_LIMIT_RECURSION=$OPT_MODSEC_PCRE_MATCH_LIMIT_RECURSION OPT_MODSEC_REQ_BODY_ACCESS=$OPT_MODSEC_REQ_BODY_ACCESS OPT_MODSEC_REQ_BODY_LIMIT=$OPT_MODSEC_REQ_BODY_LIMIT OPT_MODSEC_REQ_BODY_JSON_DEPTH_LIMIT=$OPT_MODSEC_REQ_BODY_JSON_DEPTH_LIMIT OPT_MODSEC_REQ_BODY_LIMIT_ACTION=$OPT_MODSEC_REQ_BODY_LIMIT_ACTION OPT_MODSEC_REQ_BODY_NOFILES_LIMIT=$OPT_MODSEC_REQ_BODY_NOFILES_LIMIT OPT_MODSEC_RESP_BODY_ACCESS=$OPT_MODSEC_RESP_BODY_ACCESS OPT_MODSEC_RESP_BODY_LIMIT=$OPT_MODSEC_RESP_BODY_LIMIT OPT_MODSEC_RESP_BODY_LIMIT_ACTION=$OPT_MODSEC_RESP_BODY_LIMIT_ACTION OPT_MODSEC_RESP_BODY_MIMETYPE=$OPT_MODSEC_RESP_BODY_MIMETYPE OPT_MODSEC_RULE_ENGINE=$OPT_MODSEC_RULE_ENGINE OPT_MODSEC_STATUS_ENGINE=$OPT_MODSEC_STATUS_ENGINE OPT_MODSEC_TMP_DIR=$OPT_MODSEC_TMP_DIR OPT_MODSEC_TMP_SAVE_UPLOADED_FILES=$OPT_MODSEC_TMP_SAVE_UPLOADED_FILES OPT_MODSEC_UPLOAD_DIR=$OPT_MODSEC_UPLOAD_DIR
-  envsubst '$OPT_MODSEC_AUDIT_ENGINE, $OPT_MODSEC_AUDIT_LOG, $OPT_MODSEC_AUDIT_LOG_FORMAT, $OPT_MODSEC_AUDIT_LOG_PARTS, $OPT_MODSEC_AUDIT_STORAGE, $OPT_MODSEC_AUDIT_LOG_TYPE, $OPT_MODSEC_DATA_DIR, $OPT_MODSEC_DEBUG_LOG,$OPT_MODSEC_DEBUG_LOGLEVEL,$OPT_MODSEC_PCRE_MATCH_LIMIT, $OPT_MODSEC_PCRE_MATCH_LIMIT_RECURSION, $OPT_MODSEC_REQ_BODY_ACCESS, $OPT_MODSEC_REQ_BODY_LIMIT, $OPT_MODSEC_REQ_BODY_JSON_DEPTH_LIMIT, $OPT_MODSEC_REQ_BODY_LIMIT_ACTION, $OPT_MODSEC_REQ_BODY_NOFILES_LIMIT, $OPT_MODSEC_RESP_BODY_ACCESS, $OPT_MODSEC_RESP_BODY_LIMIT, $OPT_MODSEC_RESP_BODY_LIMIT_ACTION, $OPT_MODSEC_RESP_BODY_MIMETYPE, $OPT_MODSEC_RULE_ENGINE, $OPT_MODSEC_STATUS_ENGINE, $OPT_MODSEC_TMP_DIR, $OPT_MODSEC_TMP_SAVE_UPLOADED_FILES, $OPT_MODSEC_UPLOAD_DIR' < /templates/modsecurity-override.conf.template > /tmp/config/modsecurity-override.conf
-
-  # Lets build owasp
-  cp /templates/crs-setup.conf.template /tmp/config/crs-setup.conf
-  # local setup_conf_path="/etc/nginx/conf.d/modsecurity/owasp/crs-setup.conf"
-  local setup_conf_path="/tmp/config/crs-setup.conf"
-  
+  envsubst '$OPT_MODSEC_AUDIT_ENGINE, $OPT_MODSEC_AUDIT_LOG, $OPT_MODSEC_AUDIT_LOG_FORMAT, $OPT_MODSEC_AUDIT_LOG_PARTS, $OPT_MODSEC_AUDIT_STORAGE, $OPT_MODSEC_AUDIT_LOG_TYPE, $OPT_MODSEC_DATA_DIR, $OPT_MODSEC_DEBUG_LOG,$OPT_MODSEC_DEBUG_LOGLEVEL,$OPT_MODSEC_PCRE_MATCH_LIMIT, $OPT_MODSEC_PCRE_MATCH_LIMIT_RECURSION, $OPT_MODSEC_REQ_BODY_ACCESS, $OPT_MODSEC_REQ_BODY_LIMIT, $OPT_MODSEC_REQ_BODY_JSON_DEPTH_LIMIT, $OPT_MODSEC_REQ_BODY_LIMIT_ACTION, $OPT_MODSEC_REQ_BODY_NOFILES_LIMIT, $OPT_MODSEC_RESP_BODY_ACCESS, $OPT_MODSEC_RESP_BODY_LIMIT, $OPT_MODSEC_RESP_BODY_LIMIT_ACTION, $OPT_MODSEC_RESP_BODY_MIMETYPE, $OPT_MODSEC_RULE_ENGINE, $OPT_MODSEC_STATUS_ENGINE, $OPT_MODSEC_TMP_DIR, $OPT_MODSEC_TMP_SAVE_UPLOADED_FILES, $OPT_MODSEC_UPLOAD_DIR' < /templates/modsecurity-override.conf.template > "${DEFAULT_CONFIGS_PATH}/modsecurity/modsecurity-override.conf"
   DEBUG "Modsecurity OWASP Configuration"
-  # Check if crs-setup.conf is overriden
-  # if [ -n "${MANUAL_MODE}" ]; then
-  #   echo "Using manual config mode"
-  #   return; # Don't use exit on a sourced script
-  # fi
 
   # Plugins can be disabled entirely by setting CRS_DISABLE_PLUGINS.
   if [ -n "${OPT_MODSEC_CRS_DISABLE_PLUGINS}" ]; then
-      echo "Plugins will be disabled"
-      return; # Don't use exit on a sourced script
+    echo "Plugins will be disabled"
+    return; # Don't use exit on a sourced script
   fi
 
   # Handle plugins if we have the files.
   # Note: we are careful here to not assume the existance of the "plugins"
   # directory. It is being introduced with version 4 of CRS.
-  DEBUG "Modsecurity OWASP Enable pluginx"
-  for suffix in "config" "before" "after"; do
-      if [ -n "$(find /etc/nginx/conf.d/modsecurity/owasp -path "/etc/nginx/conf.d/modsecurity/owasp/plugins/*-${suffix}.conf")" ]; then
-          # enable if there are config files
-          sed -i -E "s/^#\s*(.+-${suffix}\.conf)/\1/" /etc/nginx/conf.d/modsecurity/modsecurity.conf
-      else
-          # disable if there are no config files
-          sed -i -E "s/^([^#]+-${suffix}\.conf)/# \1/" /etc/nginx/conf.d/modsecurity/modsecurity.conf
-      fi
-  done
-
-  # Check if crs-setup.conf is overriden
-  # if [ -n "${MANUAL_MODE}" ]; then
-  #   echo "Using manual config mode"
-  #   return; # Don't use exit on a sourced script
-  # fi
+  DEBUG "Modsecurity OWASP Enable plugin"
+  # @TODO: Fix this
+  #for suffix in "config" "before" "after"; do
+  #  if [ -n "$(find /etc/nginx/conf.d/modsecurity/owasp -path "/etc/nginx/conf.d/modsecurity/owasp/plugins/*-${suffix}.conf")" ]; then
+  #    # enable if there are config files
+  #    sed -i -E "s/^#\s*(.+-${suffix}\.conf)/\1/" /etc/nginx/conf.d/modsecurity/modsecurity.conf
+  #  else
+  #    # disable if there are no config files
+  #    sed -i -E "s/^([^#]+-${suffix}\.conf)/# \1/" /etc/nginx/conf.d/modsecurity/modsecurity.conf
+  #  fi
+  #done
 
   # Paranoia Level
   sed -z -E -i 's/#SecAction[^"]+"id:900000.*tx\.paranoia_level=1\"/SecAction \\\n  \"id:900000, \\\n   phase:1, \\\n   nolog, \\\n   pass, \\\n   t:none, \\\n   setvar:tx.paranoia_level='"${OPT_MODSEC_CRS_PARANOIA}"'\"/' "${setup_conf_path}"
@@ -794,109 +342,196 @@ configure_modsecurity() {
         ctl:ruleRemoveById=1-999999"
 EOF
   fi
-
 }
 
-# Maxmind GeoIP database management
-command_maxmind_fetch() {
-  if [ -z "${OPT_MAXMIND_KEY}" ]; then
-    ERROR "Missing Maxmind licence key"
-  fi
-  DOWNLOAD_FILE="${OPT_MAXMIND_EDITION}-${OPT_MAXMIND_DATABASE}"
-  DOWNLOAD_URL="https://download.maxmind.com/app/geoip_download?edition_id=${DOWNLOAD_FILE}&license_key=${OPT_MAXMIND_KEY}&suffix=tar.gz"
-
-  INFO "MaxMind - Ready to download"
-  INFO "EDITION       : ${OPT_MAXMIND_EDITION}"
-  INFO "DATABASE      : ${OPT_MAXMIND_DATABASE}"
-  INFO "BACKUP        : ${OPT_BACKUP}"
-  # INFO "DOWNLOAD URL  : ${DOWNLOAD_URL}"
-  
-  DEBUG "Maxmind - Downloading ${DOWNLOAD_FILE} from ${DOWNLOAD_URL}"
-  mkdir -p /tmp/maxmind
-  if ! wget ${DOWNLOAD_URL} -O /tmp/${DOWNLOAD_FILE}.tar.gz; then
-    ERROR "Maxmind - Failed to download ${DOWNLOAD_FILE} from ${DOWNLOAD_URL}"
-  fi
-  DEBUG "Maxmind - Downloaded ${DOWNLOAD_FILE} from maxmind servers"
-  if ! tar -xf /tmp/${DOWNLOAD_FILE}.tar.gz -C /tmp/maxmind --strip-components 1; then
-    ERROR "Maxmind - Failed to extract ${DOWNLOAD_FILE}.tar.gz"
-  fi
-  DEBUG "Maxmind - Extracted the archive"
-  mv /tmp/maxmind/${DOWNLOAD_FILE}.mmdb /tmp/maxmind/maxmind.mmdb
-  # Take backup of existing file
-  if [ -f "${MAXMIND_PATH}/maxmind.mmdb" ] && [ "${OPT_BACKUP}" == 1 ]; then
-    DEBUG "Maxmind - Backing up existing db file"
-    mv "${MAXMIND_PATH}/maxmind.mmdb" "${MAXMIND_PATH}/maxmind-$(date +%Y-%m-%d).mmdb"
-    setgroup "${MAXMIND_PATH}/maxmind-$(date +%Y-%m-%d).mmdb"
-  fi
-  DEBUG "Maxmind - Moving the file to ${MAXMIND_PATH}/maxmind.mmdb"
-  mv -f /tmp/maxmind/maxmind.mmdb "${MAXMIND_PATH}/maxmind.mmdb"
-  setgroup "${MAXMIND_PATH}/maxmind.mmdb"
-  rm /tmp/${DOWNLOAD_FILE}.tar.gz
-  rm -rf /tmp/maxmind
-}
-
-# NGINX Log Management
-command_consolidate_logs() {
-  local path=${NGINX_LOG_PATH}
-  local dt=$(date -d @$(( $(date +"%s") - 86400)) +"%Y-%m-%d")
-  local file="access-${dt}.log"
-  # Consolidate root level logs
-  INFO "Consolidating root level logs"
-  if [ -f ${path}/access.log ]; then
-    mv -f ${path}/access.log ${path}/access-${dt}.log
-  fi
-  if [ -f ${path}/error.log ]; then
-    mv -f ${path}/error.log ${path}/error-${dt}.log
-  fi
-  if [ -f ${path}/modsec_audit.log ]; then
-    mv -f ${path}/modsec_audit.log ${path}/modsec_audit-${dt}.log
-  fi
-  DEBUG "Consolidating logs in folders (website etc)"
-  for dir in $(find /var/log/nginx -type d); do
-    DEBUG "Checking if access log files are present in ${dir}"
-    if ls ${dir}/access-${dt}@*.log > dev/null 2>&1; then
-      INFO "Consolidating ${dir} logs for date ${dt}"
-      paste -d "\n" ${dir}/access-${dt}@*.log > ${dir}/${file}
-      INFO "Removing consolidated logs"
-      rm -f ${dir}/access-${dt}@*.log
+generate_maxmind() {
+  if [ ! -z "${MAXMIND_LICENSE_KEY}" ]; then
+    # Do not download if file is alreay present
+    if [ ! -f "${MAXMIND_PATH}/maxmind.mmdb" ]; then
+      if ! maxmind-ctl download --license-key=${MAXMIND_LICENSE_KEY} --edition=${MAXMIND_EDITION} --database=${MAXMIND_DATABASE} --db-path=${MAXMIND_PATH}; then
+        LOG ERROR "Failed to download MaxMind database"
+        exit 1
+      fi
     fi
-    if [ -f ${dir}/error.log ]; then
-      INFO "Renaming error log files for date ${dt}"
-      mv -f ${dir}/error.log ${dir}/error-${dt}.log
+    # Generate the nginx config
+    
+  fi
+}
+
+command_initialize() {
+  for dir in ${NGINX_CONF_PATH} ${NGINX_WEBROOT_PATH} ${NGINX_MODULES_PATH} ${NGINX_LOG_PATH} ${MODSEC_AUDIT_STORAGE}; do
+    if [ ! -d "${dir}" ]; then
+      LOG INFO "Creating directory   : ${dir}"
+      mkdir -p ${dir}
+    fi
+    setgroup ${dir}
+  done
+}
+
+command_configure() {
+  if [ ! -f "${NGINX_CONF_PATH}/nginx.conf" ]; then
+    LOG WARN "nginx.conf not found at ${NGINX_CONF_PATH}/nginx.conf. Copying default config"
+    cp ${DEFAULT_CONFIGS_PATH}/nginx.conf ${NGINX_CONF_PATH}/nginx.conf
+  fi
+  generate_modules
+  generate_maxmind
+  generate_dhparams
+  generate_whitelist
+  generate_modsecurity
+  # Done
+}
+
+command_test() {
+  if ! nginx -t; then
+    LOG ERROR "Failed to test nginx configuration"
+    exit 1
+  fi
+}
+
+command_reload() {
+  local HASH_FILE=${NGINX_LOG_PATH}/.hash
+  local CURRENT_HASH=
+  local NEW_HASH=$(nginx -T | sha256sum | sed "s/ *\-$//")
+  if [ -f "${HASH_FILE}" ]; then
+    CURRENT_HASH=$(cat ${HASH_FILE})
+  fi
+  INFO "Current hash:               : ${CURRENT_HASH}"
+  INFO "New hash:                   : ${NEW_HASH}"
+  INFO "Force reload:               : ${FORCE}"
+  if [ "${CURRENT_HASH}" != "${NEW_HASH}" ] || [ "${FORCE}" == 1 ]; then
+    INFO "Hashes do not match, reloading nginx"
+    if ! nginx -s reload; then
+      LOG ERROR "NGINX could not be restarted!"
+      exit 1
+    fi
+    echo "${NEW_HASH}" > "${HASH_FILE}"
+  else
+    INFO "Hashes match, not reloading nginx"
+  fi
+}
+
+command_add() {
+    local SITE_NAME=$1
+    local ALT_DOMAINS=$2
+    local CERT_FILE=$3
+    local KEY_FILE=$4
+    local CA_CERT=$5
+    local SITE_CONF="${NGINX_CONF_PATH}/sites.d/${SITE_NAME}.conf"
+    local SITE_ROOT="${NGINX_WEBROOT_PATH}/${SITE_NAME}"
+    local LOG_PATH="${NGINX_LOG_PATH}/${SITE_NAME}"
+    local CACHE_PATH="${NGINX_CACHE_PATH}/${SITE_NAME}"
+    # Create the direcrtoies
+    for dir in ${SITE_ROOT} ${LOG_PATH} ${CACHE_PATH}; do
+      if [ ! -d "${dir}" ]; then
+        LOG INFO "Creating directory   : ${dir}"
+        mkdir -p ${dir}
+      fi
+      setgroup ${dir}
+    done
+    # Create the site config from template
+    LOG INFO "Creating site config : ${SITE_CONF}"
+    envsubst '$SITE_NAME $SITE_ROOT $LOG_PATH $CACHE_PATH $CERT_FILE $KEY_FILE $CA_CERT $ALT_DOMAINS' < /templates/site.conf.template > "${SITE_CONF}"
+    # Enable few items basis settings
+    if [ "${OPT_WITH_MODSECURITY}" == "1" ]; then
+      sed -i -E "s/#\s*include\s*modsecurity.conf;/include modsecurity.conf;/" "${SITE_CONF}"
+    elif [ "${OPT_WITH_MODSECURITY}" == "2" ]; then
+      sed -i -E "s/#\s*include\s*modsecurity.conf;/include modsecurity-override.conf;/" "${SITE_CONF}"
+    fi
+    
+    # Enable SSL correctly
+    if [ "${SSL_ENABLED}" == 1 ];
+    then
+      DEBUG "Updating config to enable ssl"
+      sed -i 's|#listen                         443 ssl;|listen                         443 ssl;|' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
+      sed -i 's|#listen                         \[::\]:443 ssl;|listen                         [::]:443 ssl;|' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
+      sed -i 's|#ssl_certificate                /etc/nginx/certs/$server_name.crt;|ssl_certificate                /etc/nginx/certs/'"${OPT_CERT_FILE}"';|' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
+      sed -i 's|#ssl_certificate_key            /etc/nginx/certs/$server_name.key;|ssl_certificate_key            /etc/nginx/certs/'"${OPT_CERT_KEY}"';|' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
+      sed -i 's|#add_header Strict-Transport-Security "max-age=63072000; includeSubdomains; preload" always;|add_header Strict-Transport-Security "max-age=63072000; includeSubdomains; preload" always;|' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
+      if [ "${SSL_STAPLING_ENABLED}" == 1 ]; then
+        DEBUG "Enabling SSL stapling"
+        sed -i 's|#ssl_stapling                   on;|ssl_stapling                   on;|' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
+        sed -i 's|#ssl_stapling_verify            on;|ssl_stapling_verify            on;|' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
+        sed -i 's|#ssl_trusted_certificate        /etc/nginx/certs/$server_name_ca.crt;|ssl_trusted_certificate        /etc/nginx/certs/'"${OPT_CA_CERT}"';|' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
+      fi
+      sed -i 's|#include /etc/nginx/conf.d/https-redirect.conf;|include /etc/nginx/conf.d/https-redirect.conf;|' ${NGINX_SITE_PATH}/${OPT_PRIMARY_DOMAIN}.conf
+    fi
+    # Reload nginx
+    command_reload
+}
+
+command_list() {
+  # Find all files in sites.d where extension is .conf or .conf.disabled
+  for file in $(find ${NGINX_CONF_PATH}/sites.d -type f -name "*.conf*" -printf "%f\n"); do
+    # if extension is .conf.disabled, it is a disabled site
+    if [[ "${file}" == *.conf.disabled ]]; then
+      LOG INFO "${file}                 : Disabled"
+    else
+      LOG INFO "${file}                 : Enabled"
     fi
   done
 }
 
-command_purge_logs() {
-  local log_path=${NGINX_LOG_PATH}
-  local days=30
-  DEBUG "Deleting log files older than 30 days in ${path}"
-  find ${log_path} -type f -name *.log -mtime +${days} -exec rm -f {} \;
-  for dir in $(find /var/log/nginx -type d); do
-    DEBUG "Deleting log files older than 30 days in ${dir}"
-    find ${dir} -type f -name *.log -mtime +${days} -exec rm -f {} \;
-  done
+command_disable() {
+  local SITE_NAME=$1
+  local SITE_CONF="${NGINX_CONF_PATH}/sites.d/${SITE_NAME}.conf"
+  local SITE_CONF_DISABLED="${NGINX_CONF_PATH}/sites.d/${SITE_NAME}.conf.disabled"
+  if [ ! -f ${SITE_CONF} ] && [ ! -f ${SITE_CONF_DISABLED} ]; then
+    LOG ERROR "Site ${SITE_NAME} does not exist"
+    exit 1
+  fi
+  if [ -f SITE_CONF_DISABLED ]; then
+    LOG INFO "Site ${SITE_NAME} is already disabled"
+    exit 0
+  fi
+  mv ${SITE_CONF} ${SITE_CONF_DISABLED}
+  command_reload
 }
-###############################################################################
-#                                 Main Section                                #
-###############################################################################
-if [ $# -eq 0 ]; then
-  usage
-  exit 1;
-fi
 
-COMMAND="${1:-}"
-COMMAND="${COMMAND//-/_}"
+command_enable() {
+  local SITE_NAME=$1
+  local SITE_CONF="${NGINX_CONF_PATH}/sites.d/${SITE_NAME}.conf"
+  local SITE_CONF_DISABLED="${NGINX_CONF_PATH}/sites.d/${SITE_NAME}.conf.disabled"
+  if [ ! -f ${SITE_CONF} ] && [ ! -f ${SITE_CONF_DISABLED} ]; then
+    LOG ERROR "Site ${SITE_NAME} does not exist"
+    exit 1
+  fi
+  if [ -f SITE_CONF ]; then
+    LOG INFO "Site ${SITE_NAME} is already enabled"
+    exit 0
+  fi
+  mv ${SITE_CONF_DISABLED} ${SITE_CONF}
+  command_reload
+}
+
+command_remove() {
+  local SITE_NAME=$1
+  local SITE_CONF="${NGINX_CONF_PATH}/sites.d/${SITE_NAME}.conf"
+  local SITE_CONF_DISABLED="${NGINX_CONF_PATH}/sites.d/${SITE_NAME}.conf.disabled"
+  if [ ! -f ${SITE_CONF} ] && [ ! -f ${SITE_CONF_DISABLED} ]; then
+    LOG ERROR "Site ${SITE_NAME} does not exist"
+    exit 1
+  fi
+  rm -f ${SITE_CONF} ${SITE_CONF_DISABLED}
+  # Delete webroot
+  rm -rf ${NGINX_WEBROOT_PATH}/${SITE_NAME}
+  command_reload
+}
+
+
+# Parse options
+COMMAND=$1
 if [ -z "$COMMAND" ]; then
-  ERROR "No command was specified. Run with --help to see the usage. Maybe you want to run \`$ARG0 issue\`?"
+  usage
+  exit 1
 fi
+shift  # shift off the command for getopts
 
-if ! command -v "command_${COMMAND}" > /dev/null 2>&1; then
-  ERROR "Unknown command: ${COMMAND}. Run with --help to see the usage."
-fi
-shift
+OPT_MODSECURITY=0
+OPT_CERT_FILE=
+OPT_CERT_KEY=
+OPT_CA_CERT=
 
-if ! args="$(getopt -o hd: --long help,domain:,key:,edition:,database:,with-modsecurity,custom-modsecurity,enable-stub-status,enable-ping,enable-faveico,cert-file:,cert-key:,ca-cert:,debug,force -n "$ARG0" -- "$@")"; then
+if ! args="$(getopt -o hd: --long help,domain:,cert-file:,cert-key:,ca-cert-file:,with-modsecurity,custom-modsecurity,debug -n "$ARG0" -- "$@")"; then
   usage
   exit 1
 fi
@@ -909,6 +544,9 @@ while [ "$#" -gt 0 ]; do
     -h | --help)
       usage
       exit 0
+      ;;
+    --debug)
+      DEBUG=1
       ;;
     -d | --domain)
       if [ "${1//\'/}" == "" ]; then
@@ -929,32 +567,11 @@ while [ "$#" -gt 0 ]; do
       fi
       shift
       ;;
-    --key)
-      OPT_MAXMIND_KEY=${1//\'/}
-      shift
-      ;;
-    --edition)
-      OPT_MAXMIND_EDITION=$${1//\'/}
-      shift
-      ;;
-    --database)
-      OPT_MAXMIND_DATABASE=${1//\'/}
-      shift
-      ;;
     --with-modsecurity)
       OPT_WITH_MODSECURITY=1
       ;;
     --custom-modsecurity)
       OPT_WITH_MODSECURITY=2
-      ;;
-    --enable-stub-status)
-      OPT_ENABLE_STUB_STATUS=1
-      ;;
-    --enable-ping)
-      OPT_ENABLE_PING=1
-      ;;
-    --enable-faveico)
-      OPT_ENABLE_FAVEICON=1
       ;;
     --cert-file)
       OPT_CERT_FILE=${1//\'/}
@@ -968,12 +585,6 @@ while [ "$#" -gt 0 ]; do
       OPT_CA_CERT=${1//\'/}
       shift
       ;;
-    --debug)
-      DEBUG_MODE=1
-      ;;
-    --force)
-      OPT_FORCE=1
-      ;;
     --)
       break
       ;;
@@ -984,69 +595,18 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-# if [ "${OPT_SSL_MODE}" != "none" ] && [ "${OPT_SSL_MODE}" != "acme" ] && [ "${OPT_SSL_MODE}" != "use" ] && [ "${OPT_SSL_MODE}" != "self" ]; then
-#   ERROR "Invalid SSL Mode ${OPT_SSL_MODE}. Allowed values are none, acme, use and self"
-# fi
+# Main script execution
+LOG DEBUG "Script started."
 
-# if [ "${OPT_SSL_MODE}" == "acme" ]; then
-#   OPT_SSL_GENERATE=1
-# fi
+# Execute command
+case "$COMMAND" in
+  rotate) command_rotate;;
+  purge) command_purge;;
+  *) LOG ERROR "Invalid command: $COMMAND"; usage; exit 1;;
+esac
 
-# if [ "${OPT_SSL_TYPE}" != "acme" ] && [ "${OPT_SSL_TYPE}" != "self" ]; then
-#   ERROR "SSL Type must be either acme or self."
-# fi
+LOG DEBUG "Script finished."
 
-# if [ "${OPT_USE_SSL}" != "" ]; then
-#   # Check if ssl exists for domain
-#   if [ ! -f ${NGINX_CERT_PATH}/${OPT_USE_SSL}.crt ] !! [ ! -f ${NGINX_CERT_PATH}/${OPT_USE_SSL}.key ]; then
-#     ERROR "Ensure SSL Certificate is present for ${OPT_USE_SSL} in path ${NGINX_CERT_PATH}.\n Also ensure the extension for certificate is .crt and for key is .key"
-#   fi
-#   # SSL Type will be ignored
-#   OPT_SSL_GENERATE=0
-# fi
-
-# if [ "${OPT_ACME_SERVER}" != "letsencrypt" ] && [ "${OPT_ACME_SERVER}" != "zerossl" ]; then
-#   ERROR "Invalid server ${OPT_ACME_SERVER} specified. Valid values are letsencrypt and zerossl"
-# fi
-
-EDITION=${OPT_MAXMIND_EDITION}
-DATABASE=${OPT_MAXMIND_DATABASE}
-# Validate the data
-EDITION=$(echo "${EDITION}" | tr '[:upper:]' '[:lower:]')
-DATABASE=$(echo "${DATABASE}" | tr '[:upper:]' '[:lower:]')
-if [ "${EDITION}" != 'geolite2' ] && [ "${EDITION}" != 'geoip2' ]; then
-  ERROR "Maxmind - Unknown Maxmind Edition ${EDITION}. Only GeoLite2 or GeoIP2 supported"
-fi
-# DATABASE must be either city or country
-if [ "${DATABASE}" != 'city' ] && [ "${DATABASE}" != 'country' ]; then
-  ERROR "Maxmind - Unknown Database provided. Only City or Country Supported."
-fi
-# Ok we can replace the variable again as the file names are sensitive
-if [ "${EDITION}" == "geolite2" ]; then
-  OPT_MAXMIND_EDITION="GeoLite2"
-else
-  OPT_MAXMIND_EDITION="GeoIP2"
-fi
-if [ "${DATABASE}" == "country" ]; then
-  OPT_MAXMIND_DATABASE="Country"
-else
-  OPT_MAXMIND_DATABASE="City"
-fi
-
-# if [ ${COMMAND} == 'issue' ] || [ ${COMMAND} == 'renew' ]; then
-#   if [ -z "${OPT_OUTPUT}" ]; then
-#     ERROR "Output directory is required for issue and renew commands"
-#   fi
-#   if [ ! -d ${OPT_OUTPUT} ]; then
-#     mkdir -p ${OPT_OUTPUT}
-#   fi
-# fi
-
-init
-if [ "${COMMAND}" == "initialize" ]; then
-  if [ $(whoami) != "root" ]; then
-    ERROR "Initialize and Configure must be run as root! Please re-run with root privilages"
-  fi
-fi
-"command_${COMMAND}" && cleanup
-cleanup
+# Remove lock file
+rm -f "${LOCKFILE}"
+trap - INT TERM EXIT

@@ -1,0 +1,1 @@
+0 0 1 * * log-ctl purge --days 10 --debug >> /var/log/nginx/purge_logs.log 2>&1

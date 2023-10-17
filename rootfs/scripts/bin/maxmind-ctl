@@ -1,0 +1,226 @@
+#!/bin/sh
+
+# Define the lock file
+LOCKFILE="/tmp/$(basename $0).lock"
+CONFIG_FILE="config.json"
+
+# Ensure only one instance of the script runs at a time
+if [ -e "${LOCKFILE}" ] && kill -0 `cat "${LOCKFILE}"`; then
+  echo "An instance of this script is already running."
+  exit 1
+fi
+
+# Create lock file
+trap "rm -f ${LOCKFILE}; exit" INT TERM EXIT
+echo $$ > "${LOCKFILE}"
+
+# Global variables
+DEBUG=0
+
+# Message handling
+LOG() {
+  local level="$1"
+  shift
+  case "$level" in
+    DEBUG) [ "$DEBUG" -eq 1 ] && echo "[DEBUG] $*";;
+    INFO) echo "[INFO] $*";;
+    WARN) echo "[WARN] $*" 1>&2;;
+    ERROR) echo "[ERROR] $*" 1>&2;;
+    *) echo "$*";;
+  esac
+}
+
+# Load configuration
+load_config() {
+  if [ ! -f "$CONFIG_FILE" ]; then
+    echo "Configuration file $CONFIG_FILE does not exist!"
+    exit 1
+  fi
+  DEBUG=$(jq -r '.debug' "$CONFIG_FILE")
+  VERBOSE=$(jq -r '.verbose' "$CONFIG_FILE")
+  PATH_TO_SOMETHING=$(jq -r '.path' "$CONFIG_FILE")
+  MAX_AGE=$(jq -r '.max_age' "$CONFIG_FILE")
+}
+
+# Save configuration
+save_config() {
+  jq ".debug = $DEBUG | .verbose = $VERBOSE | .path = \"$PATH_TO_SOMETHING\" | .max_age = $MAX_AGE" "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
+}
+
+# Config Variables
+LICENSE_KEY=
+EDITION=
+DATABASE=
+DB_PATH=
+BACKUP=0
+
+# Usage function
+usage() {
+  echo "Usage: $0 <command> [options]"
+  echo ""
+  echo "Commands:"
+  echo "  download                  : Downloads the maxmind database"
+  echo "    Options:"
+  echo "      --licence-key <key>   : Maxmind licence key"
+  echo "      --edition <edition>   : Maxmind edition. Valid values are 'geolite2', 'geolite2-city', 'geolite2-country', 'geoIP2', 'geoIP2-city', 'geoIP2-country'."
+  echo "      --database <database> : Maxmind database. Valid values are 'city', 'country'."
+  echo "      --db-path <path>      : Path to store the database file"
+  echo "      --backup              : Take backup of existing database file"
+  echo ""
+  echo "Options:"
+  echo "  -d, --debug               : Turn on debug mode."
+  echo "  -h, --help                : Display this help message."
+}
+
+command_download() {
+  local OUT_PATH="${DB_PATH}/maxmind.mmdb"
+  local TMP_DIR=/tmp/maxmind
+  local DOWNLOAD_FILE="${EDITION}-${DATABASE}"
+  local DOWNLOAD_URL="https://download.maxmind.com/app/geoip_download?edition_id=${DOWNLOAD_FILE}&license_key=${LICENSE_KEY}&suffix=tar.gz"
+
+  LOG DEBUG "Downloading ${DOWNLOAD_FILE} from ${DOWNLOAD_URL}"
+  LOG INFO "Downloading Maxmind GEO IP Database"
+  LOG INFO "Edition             : ${EDITION}"
+  LOG INFO "Database            : ${DATABASE}"
+  LOG INFO "Database Path       : ${DB_PATH}"
+
+  mkdir -p $TMP_DIR
+  if ! wget ${DOWNLOAD_URL} -O /tmp/${DOWNLOAD_FILE}.tar.gz; then
+    LOG ERROR "Maxmind - Failed to download ${DOWNLOAD_FILE} from ${DOWNLOAD_URL}"
+  fi
+
+  DEBUG "Maxmind - Downloaded ${DOWNLOAD_FILE} from maxmind servers"
+  if ! tar -xf /tmp/${DOWNLOAD_FILE}.tar.gz -C ${TMP_DIR} --strip-components 1; then
+    ERROR "Maxmind - Failed to extract ${DOWNLOAD_FILE}.tar.gz"
+  fi
+
+  DEBUG "Maxmind - Extracted the archive"
+  mv ${TMP_DIR}/${DOWNLOAD_FILE}.mmdb ${TMP_DIR}/maxmind.mmdb
+  # Take backup of existing file
+  if [ -f "${OUT_PATH}/maxmind.mmdb" ] && [ "${OPT_BACKUP}" == 1 ]; then
+    DEBUG "Maxmind - Backing up existing db file"
+    INFO "Maxmind - Backing up existing DB. File: ${OUT_PATH}/maxmind.mmdb"
+    mv "${OUT_PATH}/maxmind.mmdb" "${OUT_PATH}/maxmind-$(date +%Y-%m-%d).mmdb"
+    setgroup "${OUT_PATH}/maxmind-$(date +%Y-%m-%d).mmdb"
+  fi
+  DEBUG "Maxmind - Moving the file to ${OUT_PATH}/maxmind.mmdb"
+  mv -f ${TMP_DIR}/maxmind.mmdb "${OUT_PATH}/maxmind.mmdb"
+  setgroup "${OUT_PATH}/maxmind.mmdb"
+  rm -rf /tmp/${DOWNLOAD_FILE}.tar.gz ${TMP_DIR}
+}
+
+# Parse options
+COMMAND=$1
+if [ -z "$COMMAND" ]; then
+  usage
+  exit 1
+fi
+shift  # shift off the command for getopts
+
+if ! args="$(getopt -o h: --long licence-key:,edition:,database:,db-path:,backup,help,debug -n "$ARG0" -- "$@")"; then
+  usage
+  exit 1
+fi
+
+set -- $args
+while [ "$#" -gt 0 ]; do
+  arg="$1"
+  shift
+  case "$arg" in
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    --debug)
+      DEBUG_MODE=1
+      ;;
+    --licence-key)
+      LICENSE_KEY="${1//\'/}"
+      shift
+      ;;
+    --edition)
+      case "${1//\'/}" in
+        'geolite2', 'GeoLite2')
+          EDITION='GeoLite2'
+          ;;
+        'geolite2-city', 'GeoLite2-City')
+          EDITION='GeoLite2'
+          DATABASE='City'
+          ;;
+        'geolite2-country', 'GeoLite2-Country')
+          EDITION='GeoLite2'
+          DATABASE='Country'
+          ;;
+        'geoIP2', 'geoip2')
+          EDITION='GeoIP2'
+          ;;
+        'geoIP2-City', 'geoip2-city', 'geoIP2-city')
+          EDITION='GeoIP2'
+          DATABASE='City'
+          ;;
+        'geoIP2-country', 'geoip2-country', 'geoIP2-Country')
+          EDITION='GeoIP2'
+          DATABASE='Country'
+          ;;
+        *)
+          LOG ERROR "Invalid value for --edition: ${1//\'/}. Valid values are 'geolite2', 'geolite2-city', 'geolite2-country', 'geoIP2', 'geoIP2-city', 'geoIP2-country'."
+          exit 1
+          ;;
+      esac
+      ;;
+    --database)
+      case "${1//\'/}" in
+        'city', 'City')
+          DATABASE='City'
+          ;;
+        'country', 'Country')
+          DATABASE='Country'
+          ;;
+        *)
+          LOG ERROR "Invalid value for --database: ${1//\'/}. Valid values are 'city', 'country'."
+          exit 1
+          ;;
+      esac
+      ;;
+    --db-path)
+      DB_PATH="${1//\'/}"
+      if [ ! -d "$DB_PATH" ]; then
+        LOG ERROR "Invalid value for --db-path: $DB_PATH. Ensure the directory exists"
+        exit 1
+      fi
+      shift
+      ;;
+    --backup)
+      BACKUP=1
+      ;;
+    --)
+      break
+      ;;
+    *)
+      ERROR "Unknown argument '$arg' when parsing script arguments."
+      exit 1
+      ;;
+  esac
+done
+
+
+# Main script execution
+LOG DEBUG "Script started."
+
+# Execute command
+case "$COMMAND" in
+  download) 
+    if [ -z LICENSE_KEY ] || [ -z EDITION ] || [ -z DATABASE ] || [ -z DB_PATH ]; then
+      LOG ERROR "LICENSE_KEY, EDITION, DATABASE and DB_PATH are required."
+      usage
+      exit 1
+    fi
+    command_download;;
+  *) LOG ERROR "Invalid command: $COMMAND"; usage; exit 1;;
+esac
+
+LOG DEBUG "Script finished."
+
+# Remove lock file
+rm -f "${LOCKFILE}"
+trap - INT TERM EXIT

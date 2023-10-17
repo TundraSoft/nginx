@@ -135,6 +135,61 @@ command_register(){
   fi
 }
 
+command_generate() {
+  if [ "${OPT_PRIMARY_DOMAIN}" == "" ]; then
+    ERROR "Atleast one value for domain must be passed"
+  fi
+  INFO "SSL Options passed:"
+  INFO "Primary Domain                : ${OPT_PRIMARY_DOMAIN}"
+  INFO "All Domains (incl primary)    : ${OPT_DOMAINS}"
+  INFO "Certificate File              : ${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN}.crt"
+  INFO "Key File                      : ${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN}.crt"
+  local SRC_CRT_FILE=
+  local SRC_KEY_FILE=
+  local SRC_CA_FILE=
+  DEBUG "Generating SSL certificate using ACME for ${OPT_DOMAINS}"
+  # local COMMAND="--issue --stateless -d ${ALL_DOMAINS// /-d }"
+  # debug "command: ${COMMAND}"
+  callAcme --issue -d ${OPT_DOMAINS// /-d} --stateless --server ${OPT_ACME_SERVER}
+  SRC_CRT_FILE=${ACME_HOME}/${OPT_PRIMARY_DOMAIN}_ecc/fullchain.cer
+  SRC_KEY_FILE=${ACME_HOME}/${OPT_PRIMARY_DOMAIN}_ecc/${OPT_PRIMARY_DOMAIN}.key
+  SRC_CA_FILE=${ACME_HOME}/${OPT_PRIMARY_DOMAIN}_ecc/ca.cer
+  move_certificates $SRC_CRT_FILE $SRC_KEY_FILE $SRC_CA_FILE $OPT_PRIMARY_DOMAIN
+}
+
+command_renew() {
+  callAcme --renew
+  # Copy all files which have changed
+  local BACKUP_DATE=$(date +%Y-%m-%d)
+  local RELOAD=0
+  for dir in $ACME_HOME; do
+    if [ -d $DIR ]; then
+      local DOMAIN=${DIR//_ecc/}
+      local file1=$DIR/fullchain.cer
+      local file2=${NGINX_CERT_PATH}/$DOMAIN.crt
+      if ! cmp -s "$file1" "$file2"; then
+        INFO "Certificate for ${DOMAIN} has changed. Migrating"
+        RELOAD=1
+        move_certificates $DIR/fullchain.cer $DIR/$DOMAIN.key $DIR/ca.cer $DOMAIN
+      fi
+    fi
+  done;
+}
+
+command_remove() {
+  callAcme --remove -d ${OPT_PRIMARY_DOMAIN}
+  rm -f ${ACME_HOME}/${OPT_PRIMARY_DOMAIN}
+  rm -f ${ACME_HOME}/${OPT_PRIMARY_DOMAIN}_ecc
+  # Remove in nginx
+  local BACKUP_DATE=$(date +%Y-%m-%d)
+  mv -f ${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN}.crt ${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN}.crt.$BACKUP_DATE
+  mv -f ${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN}.key ${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN}.key.$BACKUP_DATE
+  mv -f ${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN}_ca.crt ${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN}_ca.crt.$BACKUP_DATE
+  # Disable SSL in site config
+  DEBUG "Updating config to disable ssl"
+}
+
+
 move_certificates() {
   local SRC_CRT_FILE=$1
   local SRC_KEY_FILE=$2
@@ -226,61 +281,6 @@ command_generate_old() {
     command_reload
   fi
 }
-
-command_generate() {
-  if [ "${OPT_PRIMARY_DOMAIN}" == "" ]; then
-    ERROR "Atleast one value for domain must be passed"
-  fi
-  INFO "SSL Options passed:"
-  INFO "Primary Domain                : ${OPT_PRIMARY_DOMAIN}"
-  INFO "All Domains (incl primary)    : ${OPT_DOMAINS}"
-  INFO "Certificate File              : ${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN}.crt"
-  INFO "Key File                      : ${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN}.crt"
-  local SRC_CRT_FILE=
-  local SRC_KEY_FILE=
-  local SRC_CA_FILE=
-  DEBUG "Generating SSL certificate using ACME for ${OPT_DOMAINS}"
-  # local COMMAND="--issue --stateless -d ${ALL_DOMAINS// /-d }"
-  # debug "command: ${COMMAND}"
-  callAcme --issue -d ${OPT_DOMAINS// /-d} --stateless --server ${OPT_ACME_SERVER}
-  SRC_CRT_FILE=${ACME_HOME}/${OPT_PRIMARY_DOMAIN}_ecc/fullchain.cer
-  SRC_KEY_FILE=${ACME_HOME}/${OPT_PRIMARY_DOMAIN}_ecc/${OPT_PRIMARY_DOMAIN}.key
-  SRC_CA_FILE=${ACME_HOME}/${OPT_PRIMARY_DOMAIN}_ecc/ca.cer
-  move_certificates $SRC_CRT_FILE $SRC_KEY_FILE $SRC_CA_FILE $OPT_PRIMARY_DOMAIN
-}
-
-command_renew() {
-  callAcme --renew
-  # Copy all files which have changed
-  local BACKUP_DATE=$(date +%Y-%m-%d)
-  local RELOAD=0
-  for dir in $ACME_HOME; do
-    if [ -d $DIR ]; then
-      local DOMAIN=${DIR//_ecc/}
-      local file1=$DIR/fullchain.cer
-      local file2=${NGINX_CERT_PATH}/$DOMAIN.crt
-      if ! cmp -s "$file1" "$file2"; then
-        INFO "Certificate for ${DOMAIN} has changed. Migrating"
-        RELOAD=1
-        move_certificates $DIR/fullchain.cer $DIR/$DOMAIN.key $DIR/ca.cer $DOMAIN
-      fi
-    fi
-  done;
-}
-
-command_remove() {
-  callAcme --remove -d ${OPT_PRIMARY_DOMAIN}
-  rm -f ${ACME_HOME}/${OPT_PRIMARY_DOMAIN}
-  rm -f ${ACME_HOME}/${OPT_PRIMARY_DOMAIN}_ecc
-  # Remove in nginx
-  local BACKUP_DATE=$(date +%Y-%m-%d)
-  mv -f ${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN}.crt ${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN}.crt.$BACKUP_DATE
-  mv -f ${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN}.key ${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN}.key.$BACKUP_DATE
-  mv -f ${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN}_ca.crt ${NGINX_CERT_PATH}/${OPT_PRIMARY_DOMAIN}_ca.crt.$BACKUP_DATE
-  # Disable SSL in site config
-  DEBUG "Updating config to disable ssl"
-}
-
 
 ###############################################################################
 #                                 Main Section                                #
