@@ -39,7 +39,7 @@ jobs:
         name: Get Mod Security version (latest)
         id: modsecurity-versions
         run: |
-          mod_security=$(curl -s https://api.github.com/repos/SpiderLabs/ModSecurity/releases/latest | jq -r .tag_name | sed -e 's/^v//')
+          mod_security=$(curl -s https://api.github.com/repositories/1320594/releases/latest | jq -r .tag_name | sed -e 's/^v//')
           echo "modsecurity-version=${mod_security}" >> "$GITHUB_OUTPUT"
       - 
         name: Get Core Ruleset version
