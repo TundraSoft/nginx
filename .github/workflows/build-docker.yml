@@ -31,7 +31,7 @@ jobs:
         name: Get Alpine Versions
         id: alpine-versions
         run: |
-          LATEST_VERSION=$(curl -s https://cz.alpinelinux.org/alpine/latest-stable/releases/x86_64/latest-releases.yaml | awk '/branch:/ {print $2; exit}')
+          LATEST_VERSION=$(curl -s https://cz.alpinelinux.org/alpine/latest-stable/releases/x86_64/latest-releases.yaml | awk '/branch:/ {print $2; exit}' | sed 's/v//')
           ALPINE_BRANCHES="edge "
           LIMIT=3
           ALL_BRANCHES=$(curl -s https://cz.alpinelinux.org/alpine/ | grep -oP '(?<=v)[^/]+(?=/")' | sort -V | tail -n 6 | tac)
