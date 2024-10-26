@@ -141,13 +141,13 @@ jobs:
       -
         name: Test Image
         run: |
-          output=$(docker run --rm ${{ env.TEST_TAG}} /bin/sh -c "deno --version | grep -q ${{ matrix.nginx-version }} && echo 'OK' || echo 'KO'")
-          # if [ "$output" == "OK" ]; then
-          #   echo "Test Passed"
-          # else
-          #   echo "Test Failed"
-          #   exit 1
-          # fi
+          output=$(docker run --rm ${{ env.TEST_TAG}} /bin/sh -c "nginx -v 2>&1 | grep -q ${{ matrix.nginx-version }} && echo 'OK' || echo 'KO'")
+          if [ "$output" == "OK" ]; then
+            echo "Test Passed"
+          else
+            echo "Test Failed"
+            exit 1
+          fi
       
       -
         name: Login to DockerHub
@@ -178,7 +178,9 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             ALPINE_VERSION=${{ matrix.alpine-branch }}
-            DENO_VERSION=${{ matrix.deno-version }}
+            DENO_VERSION=${{ matrix.nginx-version }}
+            MOD_SECURITY_VERSION=${{ needs.setup.outputs.modsecurity-version }}
+            CRS_VERSION=${{ needs.setup.outputs.crs-version }}
     
   chore:
     needs: build
