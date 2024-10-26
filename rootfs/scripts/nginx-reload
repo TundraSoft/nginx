@@ -1,0 +1,23 @@
+#!/bin/sh
+if [ $(whoami) == "root" ]; then
+  su -s /bin/sh -c 'nginx-reload' tundra
+else
+  local CONFIG_HASH=$(nginx -T | sha512sum | sed "s/ *\-$//")
+  local HASH_FILE=/tmp/nginx.hash
+  local CURRENT_HASH=
+  if [ -f "${HASH_FILE}" ]; then
+    # Load the value
+    CURRENT_HASH=$(cat ${HASH_FILE})
+  fi
+  if [ "$CURRENT_HASH" != $CONFIG_HASH ] || [ "$OPT_FORCE" == 1 ]; then
+    if ! nginx -t; then
+      echo "Invalid nginx config. Ignoring changes."
+      exit 1
+    fi
+    if ! nginx -s reload; then
+      echo "Failed to reload nginx config"
+      exit 1
+    fi
+  fi
+  echo ${CONFIG_HASH} > ${HASH_FILE}
+fi

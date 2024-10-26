@@ -1,1 +1,0 @@
-$ACME_RENEW acme-ctl renew >> /var/log/nginx/acme.log 2>&1
