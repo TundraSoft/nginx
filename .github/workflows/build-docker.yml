@@ -94,6 +94,15 @@ jobs:
         uses: docker/setup-buildx-action@v3
       
       - 
+        name: Echo Variables
+        run: |
+          echo "ALPINE_BRANCH=${{ matrix.alpine-branch }}"
+          echo "NGINX_VERSION=${{ matrix.nginx-version }}"
+          echo "MOD_SECURITY_VERSION=${{ needs.setup.outputs.modsecurity-version }}"
+          echo "CRS_VERSION=${{ needs.setup.outputs.crs-version }}"
+          echo "IS_LATEST=${{ matrix.alpine-branch == needs.setup.outputs.latest-alpine-branch && matrix.nginx-version == needs.setup.outputs.latest-nginx-version && github.ref_name == github.event.repository.default_branch }}"
+      
+      - 
         name: Extract Docker Metadata
         id: meta
         uses: docker/metadata-action@v5
@@ -116,7 +125,7 @@ jobs:
             org.opencontainers.image.description=NGINX with modsecurity on alpine
             org.opencontainers.image.title=NGINX with modsecurity and core ruleset on alpine
           tags: |
-            type=raw,prefix=,value=latest,enable=${{ ( matrix.alpine-branch == needs.setup.outputs.latest-alpine-branch && matrix.nginx-version == needs.setup.outputs.latest-nginx-version && github.ref_name == github.event.repository.default_branch) }}
+            type=raw,prefix=,value=latest,enable=${{ matrix.alpine-branch == needs.setup.outputs.latest-alpine-branch && matrix.nginx-version == needs.setup.outputs.latest-nginx-version && github.ref_name == github.event.repository.default_branch }}
             # Version
             type=semver,pattern={{major}}.{{minor}}.{{patch}},value=${{ matrix.nginx-version }},enable=${{ matrix.alpine-branch == needs.setup.outputs.latest-alpine-branch && github.ref_name == github.event.repository.default_branch }}
             type=semver,pattern={{major}}.{{minor}},value=${{ matrix.nginx-version }},enable=${{ matrix.alpine-branch == needs.setup.outputs.latest-alpine-branch && github.ref_name == github.event.repository.default_branch }}
