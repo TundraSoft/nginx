@@ -1,0 +1,97 @@
+set site_name             ; # The site name
+set site_domains          ; # All domains
+set site_cache            0; # Enable Cache
+set site_cache_expire     30m; # Cache expire time
+# Enable Cache zone
+#proxy_cache_path /var/cache/nginx/$site_name levels=1:2 keys_zone=$site_name:$site_cache_expire max_size=10g inactive=60m use_temp_path=off;
+
+# Enable Rate Limiting
+#limit_req_zone $binary_remote_addr zone=limit_$site_name:10m rate=10r/s;
+
+server {
+  server_name                     $site_domains;
+  listen                          80;
+  listen                          [::]:80;
+
+  #listen                         443 ssl;
+  #listen                         [::]:443 ssl;
+  #ssl_certificate                /etc/nginx/certs/$site_name.crt;
+  #ssl_certificate_key            /etc/nginx/certs/$site_name.key;
+  #ssl_stapling                   on;
+  #ssl_stapling_verify            on;
+  #ssl_trusted_certificate        /etc/nginx/certs/$site_name_ca.crt;
+  
+  access_log                      /var/log/nginx/$site_name-access-$log_date.log  main;
+  error_log                       /var/log/nginx/error.log;
+  root                            /webroot/$site_name;
+
+  # Few redirects
+  ###################################################
+  # www -> no www redirect
+  ###################################################
+  #if ($host ~ ^www\.) {
+  #   return 301 https://$primary_domain$request_uri;
+  #}
+
+  ###################################################
+  # Mod Security
+  ###################################################
+  modsecurity off;
+  modsecurity_rules_file /etc/nginx/conf.d/modsecurity/modsecurity.default.includes.conf;
+
+  ########################################
+  # Location, Location, Location
+  ########################################
+  # Error pages
+  error_page 500 502 503 504  /50x.html;
+  location = /50x.html {
+    root /webroot/default/;
+    internal;
+  }
+
+  error_page 404 /404.html;
+  location = /404.html {
+    root /webroot/default/;
+    internal;
+  }
+  
+  # Disable .htaccess and other hidden files
+  location ~ /\.(?!well-known).* {
+      deny all;
+      access_log off;
+      log_not_found off;
+      return 404;
+  }
+
+  # Cache static files
+  location ~* \.(jpg|jpeg|png|gif|ico|css|js|svg|otf|mp4|ogg|webm)$ {
+    expires 7d;
+  }
+  
+  # Add Any other routes here
+  location = /ping {
+    access_log off;
+    add_header Content-Type text/plain;
+    return 200 "pong";
+  }
+
+  location = /healthz {
+    include /etc/nginx/conf.d/ip-whitelist.conf;
+    include /etc/nginx/conf.d/ip-blacklist.conf; # (This is basic blacklist IP not a deny all)
+    deny all; # Deny all other IP
+    access_log off;
+    stub_status;
+  }
+
+  location = /favicon.ico {
+    try_files $uri =404;
+    log_not_found off;
+    access_log off;
+  }
+  
+  location = / {
+    root /webroot/$server_name;
+    index index.html index.htm;
+    try_files \$uri \$uri/ =404;
+  }
+}

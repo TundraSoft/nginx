@@ -9,17 +9,21 @@ on:
       - .gitignore
       - .github/ISSUE_TEMPLATE/*
       - .github/PULL_REQUEST_TEMPLATE*
+      - ./*.md
+      - ./LICENSE
   pull_request:
     branches: [ main ]
-  # schedule:
-  #   - cron: '0 0 * * 0'
+  schedule:
+    - cron: '0 0 * * 0'
 
 jobs:
-  get-versions:
+  setup:
     runs-on: ubuntu-latest
     outputs:
-      alpine-versions: ${{ steps.alpine-versions.outputs.alpine-versions }}
+      alpine-branches: ${{ steps.alpine-versions.outputs.alpine-branches }}
+      latest-alpine-branch: ${{ steps.alpine-versions.outputs.latest-alpine-branch }}9#
       nginx-versions: ${{ steps.nginx-versions.outputs.nginx-versions }}
+      latest-nginx-version: ${{ steps.nginx-versions.outputs.latest-nginx-version }}
       modsecurity-version: ${{ steps.modsecurity-versions.outputs.modsecurity-version }}
       crs-version: ${{ steps.crs-versions.outputs.crs-version }}
     steps:
@@ -27,20 +31,40 @@ jobs:
         name: Get Alpine Versions
         id: alpine-versions
         run: |
-          ALPINE_VERSIONS=$(curl -s https://cz.alpinelinux.org/alpine/ | grep -oP '(?<=v)[^/]+(?=/")' | sort -V | tail -n 3 | tac | jq -Rcn '[inputs]')
-          echo "alpine-versions=${ALPINE_VERSIONS}" >> "$GITHUB_OUTPUT"
+          LATEST_VERSION=$(curl -s https://cz.alpinelinux.org/alpine/latest-stable/releases/x86_64/latest-releases.yaml | awk '/branch:/ {print $2; exit}' | sed 's/v//')
+          ALPINE_BRANCHES="edge "
+          LIMIT=3
+          ALL_BRANCHES=$(curl -s https://cz.alpinelinux.org/alpine/ | grep -oP '(?<=v)[^/]+(?=/")' | sort -V | tail -n 6 | tac)
+          for BRANCH in $ALL_BRANCHES
+          do
+            if curl --output /dev/null --silent --head --fail "https://cz.alpinelinux.org/alpine/v${BRANCH}/releases/";
+            then
+              ALPINE_BRANCHES+="${BRANCH} "
+              LIMIT=$((LIMIT-1))
+            fi
+            if [ $LIMIT -le 0 ]; then
+              break
+            fi
+          done
+          ALPINE_BRANCHES=$(echo $ALPINE_BRANCHES | tr ' ' '\n' | jq -Rcn '[inputs] | sort | reverse')
+          echo "alpine-branches=${ALPINE_BRANCHES}" >> "$GITHUB_OUTPUT"
+          echo "latest-alpine-branch=${LATEST_VERSION}" >> "$GITHUB_OUTPUT"
+      
       - 
         name: Get Nginx Versions
         id: nginx-versions
         run: |
           NGINX_VERSIONS=$(curl -s https://nginx.org/download/ | grep -oP '(?<=nginx-)[0-9\.]+(?=.tar.gz")' | sort -V | tail -n 4 | tac | jq -Rcn '[inputs]')
           echo "nginx-versions=${NGINX_VERSIONS}" >> "$GITHUB_OUTPUT"
+          echo "latest-nginx-version=$(echo $NGINX_VERSIONS | jq -r .[0])" >> "$GITHUB_OUTPUT"
+      
       - 
         name: Get Mod Security version (latest)
         id: modsecurity-versions
         run: |
           mod_security=$(curl -s https://api.github.com/repositories/1320594/releases/latest | jq -r .tag_name | sed -e 's/^v//')
           echo "modsecurity-version=${mod_security}" >> "$GITHUB_OUTPUT"
+      
       - 
         name: Get Core Ruleset version
         id: crs-versions
@@ -48,79 +72,127 @@ jobs:
           crs_version=$(curl -s https://api.github.com/repos/coreruleset/coreruleset/releases/latest | jq -r .tag_name | sed -e 's/^v//')
           echo "crs-version=${crs_version}" >> "$GITHUB_OUTPUT"
   
-  build-image:
-    needs: [get-versions]
+  build:
+    needs: setup
     runs-on: ubuntu-latest
     strategy:
       # max-parallel: 2
       fail-fast: false
       matrix:
-        nginx-version: ${{ fromJson(needs.get-versions.outputs.nginx-versions) }}
-        alpine-version: ${{ fromJson(needs.get-versions.outputs.alpine-versions) }}
+        alpine-branch: ${{ fromJson(needs.setup.outputs.alpine-branches) }}
+        nginx-version: ${{ fromJson(needs.setup.outputs.nginx-versions) }}
+    
+    env:
+      TEST_TAG: nginx
+    
     steps:
       -
         name: Checkout
         uses: actions/checkout@v4
-      -
-        # Add support for more platforms with QEMU (optional)
-        # https://github.com/docker/setup-qemu-action
-        name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-      -
+      - 
         name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+      
+      - 
+        name: Extract Docker Metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          flavor: |
+            latest=false
+          images: |
+            name=${{ github.repository }},enable=true
+            name=ghcr.io/${{ github.repository }},enable=true
+          labels: |
+            org.opencontainers.image.source=${{ github.repositoryUrl }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.created=${{ github.event.repository.pushed_at }}
+            org.opencontainers.image.authors=${{ github.actor }}
+            org.opencontainers.image.branch=${{ github.ref_name }}
+            org.opencontainers.image.version=${{ matrix.nginx-version }}
+            org.opencontainers.image.vendor=Tundrasoft
+            org.opencontainers.image.licenses=MIT
+            org.opencontainers.image.documentation=${{ github.repositoryUrl }}/blob/main/README.md
+            org.opencontainers.image.description=NGINX with modsecurity on alpine
+            org.opencontainers.image.title=NGINX with modsecurity and core ruleset on alpine
+          tags: |
+            type=raw,prefix=,value=latest,enable=${{ ( matrix.alpine-branch == needs.setup.outputs.latest-alpine-branch && matrix.nginx-version == needs.setup.outputs.latest-nginx-version && github.ref_name == github.event.repository.default_branch) }}
+            # Branch name tag is reserved for the latest version of Deno and Alpine of that branch
+            type=raw,prefix=,value=${{ github.ref_name }},enable=${{ ( matrix.alpine-branch == needs.setup.outputs.latest-alpine-branch && matrix.nginx-version == needs.setup.outputs.latest-nginx-version && github.ref_name != github.event.repository.default_branch) }}
+            # type=semver,prefix=${{ github.ref_name == github.event.repository.default_branch && '' || format('{0}-', github.ref_name) }},pattern={{major}}.{{minor}},value=${{ matrix.nginx-version }},enable=${{ matrix.nginx-version == needs.setup.outputs.latest-nginx-version && matrix.alpine-branch == needs.setup.outputs.latest-alpine-branch }}
+            type=semver,prefix=${{ github.ref_name == github.event.repository.default_branch && '' || format('{0}-', github.ref_name) }},pattern={{major}}.{{minor}}.{{patch}},value=${{ matrix.nginx-version }},enable=${{ matrix.alpine-branch == needs.setup.outputs.latest-alpine-branch }}
+            type=raw,prefix=${{ github.ref_name == github.event.repository.default_branch && '' || format('{0}-', github.ref_name) }},value=${{ format('{0}-alpine-{1}', matrix.nginx-version, matrix.alpine-branch) }},enable=true
+      
+      - 
+        name: Build Test Image
+        id: build-image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: ${{ env.TEST_TAG }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            ALPINE_VERSION=${{ matrix.alpine-branch }}
+            NGINX_VERSION=${{ matrix.nginx-version }}
+            MOD_SECURITY_VERSION=${{ needs.setup.outputs.modsecurity-version }}
+            CRS_VERSION=${{ needs.setup.outputs.crs-version }}
+      
+      -
+        name: Test Image
+        run: |
+          output=$(docker run --rm ${{ env.TEST_TAG}} /bin/sh -c "nginx -v 2>&1 | grep -q ${{ matrix.nginx-version }} && echo 'OK' || echo 'KO'")
+          if [ "$output" == "OK" ]; then
+            echo "Test Passed"
+          else
+            echo "Test Failed"
+            exit 1
+          fi
+      
       -
         name: Login to DockerHub
-        if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3 
+        uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
+      
       -
         name: Login to GHCR
-        if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GIT_HUB_TOKEN }}
-      -
-        name: Docker meta
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: | 
-            ${{ github.repository }}
-            ghcr.io/${{ github.repository }}
-          flavor: |
-            latest=false
-          tags: |
-            type=raw,prefix=,value=latest,enable=${{ (matrix.alpine-version == fromJson(needs.get-versions.outputs.alpine-versions)[0]) && (matrix.nginx-version == fromJson(needs.get-versions.outputs.nginx-versions)[0]) && (github.ref == format('refs/heads/{0}', github.event.repository.default_branch)) }},priority=1000
-            type=semver,prefix=,pattern={{major}}.{{minor}}.{{patch}},value=${{ matrix.nginx-version }},enable=${{ matrix.alpine-version == fromJson(needs.get-versions.outputs.alpine-versions)[0] && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }},priority=900
-            type=raw,prefix=,value=${{ matrix.nginx-version }}-alpine-${{ matrix.alpine-version }},enable=${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }},priority=300
-            type=raw,prefix=,value=${{ github.ref_name }},enable=${{ (matrix.alpine-version == fromJson(needs.get-versions.outputs.alpine-versions)[0]) && (matrix.nginx-version == fromJson(needs.get-versions.outputs.nginx-versions)[0]) && (github.ref != format('refs/heads/{0}', github.event.repository.default_branch)) }},priority=1000
-            type=raw,prefix=,value=${{ github.ref_name }}-${{ matrix.nginx-version }},enable=${{ matrix.alpine-version == fromJson(needs.get-versions.outputs.alpine-versions)[0] && github.ref != format('refs/heads/{0}', github.event.repository.default_branch) }},priority=900
-            type=raw,prefix=,value=${{ github.ref_name }}-${{ matrix.nginx-version }}-alpine-${{ matrix.alpine-version }},enable=${{ github.ref != format('refs/heads/{0}', github.event.repository.default_branch) }},priority=300
-      -
-        name: Build and push
+      
+      - 
+        name: Build and Push
+        id: build-push
         uses: docker/build-push-action@v5
         with:
           context: .
-          # platforms: linux/amd64,linux/arm/v7,linux/arm64,linux/arm/v8
-          platforms: linux/amd64
-          provenance: false
-          build-args: |
-            ALPINE_VERSION=${{ matrix.alpine-version }}
-            NGINX_VERSION=${{ matrix.nginx-version }}
-            MOD_SECURITY_VERSION=${{ needs.get-versions.outputs.modsecurity-version }}
-            CRS_VERSION=${{ needs.get-versions.outputs.crs-version }}
-          push: ${{ github.event_name != 'pull_request' }}
-          # push: true
+          push: true
+          #,linux/arm/v7
+          platforms: linux/amd64,linux/arm64
+          provenance: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            ALPINE_VERSION=${{ matrix.alpine-branch }}
+            DENO_VERSION=${{ matrix.nginx-version }}
+            MOD_SECURITY_VERSION=${{ needs.setup.outputs.modsecurity-version }}
+            CRS_VERSION=${{ needs.setup.outputs.crs-version }}
+    
+  chore:
+    needs: build
+    if: github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    steps:
+      - 
+        uses: actions/checkout@v4
+        
       -
         name: Update repo description
-        uses: peter-evans/dockerhub-description@v3
+        uses: peter-evans/dockerhub-description@v4
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}

@@ -1,12 +1,40 @@
 #!/command/with-contenv sh
-if [ -f /var/log/nginx/nginx-ctl.lock ]; then
-  echo "There is already a process running. Waiting for that to complete"
-  # Waut for configuration to finish
-  while [ -f /var/log/nginx/nginx-ctl.lock ]; do
-    sleep 10
-  done
-  echo "Configuration completed. Continuing"
-  nginx-ctl initialize
-else
-  nginx-ctl configure
+
+# Variables
+NGINX_MODULES_PATH=/usr/local/nginx/modules
+NGINX_CACHE_PATH='/var/cache/nginx'
+NGINX_CONF_PATH='/etc/nginx'
+NGINX_LOG_PATH='/var/log/nginx'
+NGINX_PID_PATH='/var/run/nginx.pid'
+NGINX_PREFIX='/usr/local/nginx'
+NGINX_WEBROOT='/webroot'
+# Modescurity Folders
+MODSECURITY_CONF_PATH="${NGINX_CONF_PATH}/conf.d/modsecurity"
+# MODSEC_DEBUG_LOG=/var/log/nfinx/modsec_debug.log
+# MODSEC_AUDIT_LOG=/var/log/nginx/modsec_audit.log
+MODSEC_AUDIT_STORAGE=/var/log/nginx/modsec_audit
+MODSEC_DATA_DIR=/tmp/modsecurity/data
+MODSEC_TMP_DIR=/tmp/modsecurity/tmp
+MODSEC_UPLOAD_DIR=/tmp/modsecurity/upload
+TEMPLATE_PATH='/templates'
+
+# These items are to be created in each instance of nginx
+if [ ! -f ${NGINX_PID_PATH} ];
+then
+  touch ${NGINX_PID_PATH}
 fi
+
+
+# Create the directories
+for i in ${MODSEC_DATA_DIR} ${MODSEC_TMP_DIR} ${MODSEC_UPLOAD_DIR} ${MODSEC_AUDIT_STORAGE} ${NGINX_CACHE_PATH} ${NGINX_CONF_PATH} ${NGINX_LOG_PATH} ${NGINX_PREFIX} ${NGINX_WEBROOT} ${MODSECURITY_CONF_PATH}
+do
+  if [ ! -d "${i}" ]
+  then
+    mkdir -p ${i}
+  fi
+done
+
+for i in ${MODSEC_DATA_DIR} ${MODSEC_TMP_DIR} ${MODSEC_UPLOAD_DIR} ${MODSEC_AUDIT_STORAGE} ${NGINX_CACHE_PATH} ${NGINX_CONF_PATH} ${NGINX_LOG_PATH} ${NGINX_PID_PATH} ${NGINX_PREFIX} ${NGINX_WEBROOT}
+do
+  setgroup ${i}
+done

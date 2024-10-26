@@ -1,1 +1,0 @@
-0 0 1 * * nginx-ctl purge-logs --debug >> /var/log/nginx/log_action.log 2>&1

@@ -1,25 +1,87 @@
 <!DOCTYPE html>
-<html>
-
+<html lang="en">
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Welcome to nginx!</title>
     <style>
         html {
             color-scheme: light dark;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f0f0f0;
+            color: #333;
         }
 
         body {
-            width: 35em;
-            margin: 0 auto;
-            font-family: Tahoma, Verdana, Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background-color: #fff;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            border-radius: 8px;
+        }
+
+        h1 {
+            color: #007acc;
+            text-align: center;
+        }
+
+        p {
+            font-size: 1.2em;
+            line-height: 1.6;
+            text-align: center;
+        }
+
+        .quote {
+            font-style: italic;
+            margin-top: 20px;
+            text-align: center;
+        }
+
+        .author {
+            margin-top: 10px;
+            text-align: center;
+            font-weight: bold;
         }
     </style>
 </head>
 
 <body>
-    <h1>Welcome to nginx!</h1>
-    <p>This is the default page! Please update your configuration to reflect your actual content</p>
-
+    <h1>Do not panic!</h1>
+    <div class="quote">
+        <p id="quote"></p>
+        <div class="author">A random webserver serving quotes from - The Hitchhiker's Guide to the Galaxy</div>
+    </div>
+    <script type="text/javascript">
+        const quotes = [
+            'The Answer to the Ultimate Question of Life, the Universe, and Everything is 42.',
+            'Time is an illusion. Lunchtime doubly so.',
+            'A common mistake that people make when trying to design something completely foolproof is to underestimate the ingenuity of complete fools.',
+            'Your planet is scheduled for demolition to make way for a hyperspatial express route.',
+            'So long, and thanks for all the fish.',
+            'I love deadlines. I love the whooshing noise they make as they go by.',
+            'In the beginning the Universe was created. This has made a lot of people very angry and been widely regarded as a bad move.',
+            'For a moment, nothing happened. Then, after a second or so, nothing continued to happen.',
+            'The ships hung in the sky in much the same way that bricks don\'t.',
+            'Anyone who is capable of getting themselves made President should on no account be allowed to do the job.',
+            'The chances of finding out what\'s really going on in the universe are so remote, the only thing to do is hang the sense of it and keep yourself occupied.',
+            'There is a theory which states that if ever anyone discovers exactly what the Universe is for and why it is here, it will instantly disappear and be replaced by something even more bizarre and inexplicable.',
+            'There is another theory which states that this has already happened.',
+            'We demand rigidly defined areas of doubt and uncertainty!',
+            'Life... is like a grapefruit. It\'s orange and squishy, and has a few pips in it, and some folks have half a one for breakfast.',
+            'The Guide is definitive. Reality is frequently inaccurate.',
+            'To summarize the summary of the summary: people are a problem.',
+            'The knack of flying is learning how to throw yourself at the ground and miss.',
+            'He felt that his whole life was some kind of dream and he sometimes wondered whose it was and whether they were enjoying it.',
+            'The story so far: In the beginning the Universe was created. This has made a lot of people very angry and been widely regarded as a bad move.',
+            'A towel, it says, is about the most massively useful thing an interstellar hitchhiker can have.'
+        ];
+        // Set the quote once document is loaded
+        (function () {
+            const randomIndex = Math.floor(Math.random() * quotes.length);
+            document.getElementById('quote').textContent = quotes[randomIndex];
+        })();
+    </script>
 </body>
 
 </html>
