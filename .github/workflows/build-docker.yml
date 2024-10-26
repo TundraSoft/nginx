@@ -117,11 +117,19 @@ jobs:
             org.opencontainers.image.title=NGINX with modsecurity and core ruleset on alpine
           tags: |
             type=raw,prefix=,value=latest,enable=${{ ( matrix.alpine-branch == needs.setup.outputs.latest-alpine-branch && matrix.nginx-version == needs.setup.outputs.latest-nginx-version && github.ref_name == github.event.repository.default_branch) }}
-            # Branch name tag is reserved for the latest version of Deno and Alpine of that branch
-            type=raw,prefix=,value=${{ github.ref_name }},enable=${{ ( matrix.alpine-branch == needs.setup.outputs.latest-alpine-branch && matrix.nginx-version == needs.setup.outputs.latest-nginx-version && github.ref_name != github.event.repository.default_branch) }}
-            # type=semver,prefix=${{ github.ref_name == github.event.repository.default_branch && '' || format('{0}-', github.ref_name) }},pattern={{major}}.{{minor}},value=${{ matrix.nginx-version }},enable=${{ matrix.nginx-version == needs.setup.outputs.latest-nginx-version && matrix.alpine-branch == needs.setup.outputs.latest-alpine-branch }}
-            type=semver,prefix=${{ github.ref_name == github.event.repository.default_branch && '' || format('{0}-', github.ref_name) }},pattern={{major}}.{{minor}}.{{patch}},value=${{ matrix.nginx-version }},enable=${{ matrix.alpine-branch == needs.setup.outputs.latest-alpine-branch }}
-            type=raw,prefix=${{ github.ref_name == github.event.repository.default_branch && '' || format('{0}-', github.ref_name) }},value=${{ format('{0}-alpine-{1}', matrix.nginx-version, matrix.alpine-branch) }},enable=true
+            # Version
+            type=semver,pattern={{major}}.{{minor}}.{{patch}},value=${{ matrix.nginx-version }},enable=${{ matrix.alpine-branch == needs.setup.outputs.latest-alpine-branch && github.ref_name == github.event.repository.default_branch }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ matrix.nginx-version }},enable=${{ matrix.alpine-branch == needs.setup.outputs.latest-alpine-branch && github.ref_name == github.event.repository.default_branch }}
+            type=semver,pattern={{major}},value=${{ matrix.nginx-version }},enable=${{ matrix.alpine-branch == needs.setup.outputs.latest-alpine-branch && github.ref_name == github.event.repository.default_branch }}
+            # Version with alpine prefix
+            type=semver,prefix=${{ format('alpine-{0}-', matrix.alpine-branch) }},pattern={{major}}.{{minor}}.{{patch}},value=${{ matrix.nginx-version }},enable=${{ github.ref_name == github.event.repository.default_branch }}
+            
+            # Version with branch
+            type=semver,prefix=${{ format('{0}-', github.ref_name)}},pattern={{major}}.{{minor}}.{{patch}},value=${{ matrix.nginx-version }},enable=${{ matrix.alpine-branch != 'edge' && matrix.alpine-branch == needs.setup.outputs.latest-alpine-branch && github.ref_name != github.event.repository.default_branch }}
+            type=semver,prefix=${{ format('{0}-', github.ref_name)}},pattern={{major}}.{{minor}},value=${{ matrix.nginx-version }},enable=${{ matrix.alpine-branch != 'edge' && matrix.alpine-branch == needs.setup.outputs.latest-alpine-branch && github.ref_name != github.event.repository.default_branch }}
+            type=semver,prefix=${{ format('{0}-', github.ref_name)}},pattern={{major}}.{{minor}},value=${{ matrix.nginx-version }},enable=${{ matrix.alpine-branch != 'edge' && matrix.alpine-branch == needs.setup.outputs.latest-alpine-branch && github.ref_name != github.event.repository.default_branch }}
+            # Version with branch and alpine prefix
+            type=semver,prefix=${{ format('{0}-alpine-{1}-', github.ref_name, matrix.alpine-branch) }},pattern={{major}}.{{minor}}.{{patch}},value=${{ matrix.nginx-version }},enable=${{ github.ref_name != github.event.repository.default_branch }}
       
       - 
         name: Build Test Image
