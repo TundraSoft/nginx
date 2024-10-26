@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       alpine-branches: ${{ steps.alpine-versions.outputs.alpine-branches }}
-      latest-alpine-branch: ${{ steps.alpine-versions.outputs.latest-alpine-branch }}9#
+      latest-alpine-branch: ${{ steps.alpine-versions.outputs.latest-alpine-branch }}
       nginx-versions: ${{ steps.nginx-versions.outputs.nginx-versions }}
       latest-nginx-version: ${{ steps.nginx-versions.outputs.latest-nginx-version }}
       modsecurity-version: ${{ steps.modsecurity-versions.outputs.modsecurity-version }}
@@ -31,7 +31,7 @@ jobs:
         name: Get Alpine Versions
         id: alpine-versions
         run: |
-          LATEST_VERSION=$(curl -s https://cz.alpinelinux.org/alpine/latest-stable/releases/x86_64/latest-releases.yaml | awk '/branch:/ {print $2; exit}' | sed 's/v//')
+          LATEST_VERSION=$(curl -s https://cz.alpinelinux.org/alpine/latest-stable/releases/x86_64/latest-releases.yaml | awk '/branch:/ {print $2; exit}')
           ALPINE_BRANCHES="edge "
           LIMIT=3
           ALL_BRANCHES=$(curl -s https://cz.alpinelinux.org/alpine/ | grep -oP '(?<=v)[^/]+(?=/")' | sort -V | tail -n 6 | tac)
@@ -39,7 +39,7 @@ jobs:
           do
             if curl --output /dev/null --silent --head --fail "https://cz.alpinelinux.org/alpine/v${BRANCH}/releases/";
             then
-              ALPINE_BRANCHES+="${BRANCH} "
+              ALPINE_BRANCHES+="v${BRANCH} "
               LIMIT=$((LIMIT-1))
             fi
             if [ $LIMIT -le 0 ]; then
@@ -92,15 +92,6 @@ jobs:
       - 
         name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-      
-      - 
-        name: Echo Variables
-        run: |
-          echo "ALPINE_BRANCH=${{ matrix.alpine-branch }}"
-          echo "NGINX_VERSION=${{ matrix.nginx-version }}"
-          echo "MOD_SECURITY_VERSION=${{ needs.setup.outputs.modsecurity-version }}"
-          echo "CRS_VERSION=${{ needs.setup.outputs.crs-version }}"
-          echo "IS_LATEST=${{ matrix.alpine-branch == needs.setup.outputs.latest-alpine-branch && matrix.nginx-version == needs.setup.outputs.latest-nginx-version && github.ref_name == github.event.repository.default_branch }}"
       
       - 
         name: Extract Docker Metadata
