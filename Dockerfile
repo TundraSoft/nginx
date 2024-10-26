@@ -4,7 +4,7 @@ ARG ALPINE_VERSION=3.19 \
     NGINX_VERSION=1.27.2
 
 # we use latest only as this is for build
-FROM tundrasoft/alpine:new-build-${ALPINE_VERSION} AS build
+FROM tundrasoft/alpine:${ALPINE_VERSION} AS build
 
 ARG ALPINE_VERSION \
     CRS_VERSION \
@@ -79,7 +79,7 @@ RUN set -eux; \
     rm -rf objs/*;
 
 # Core Rule set
-FROM tundrasoft/alpine:new-build-${ALPINE_VERSION} AS coreruleset
+FROM tundrasoft/alpine:${ALPINE_VERSION} AS coreruleset
 
 ARG CRS_VERSION
 
@@ -104,7 +104,7 @@ RUN set -eux; \
         /opt/owasp-crs/tests;
 
 # Final image
-FROM tundrasoft/alpine:new-build-${ALPINE_VERSION}
+FROM tundrasoft/alpine:${ALPINE_VERSION}
 
 LABEL maintainer="Abhinav A V <36784+abhai2k@users.noreply.github.com>"
 
